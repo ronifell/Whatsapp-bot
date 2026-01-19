@@ -266,9 +266,6 @@ class CanopusRPAService {
       // Navegar para a página de login usando método tolerante
       await this.navigateTo(config.canopus.url);
 
-      // Captura screenshot da página de login
-      await this.screenshot('01-login-page');
-
       // IMPORTANTE: Os seletores abaixo são EXEMPLOS
       // Você precisa ajustá-los de acordo com o site real da Canopus
       
@@ -484,8 +481,6 @@ class CanopusRPAService {
         throw new Error('Não foi possível encontrar o campo de senha. Verifique os seletores no código e o screenshot.');
       }
 
-      await this.screenshot('02-credentials-filled');
-
       // Aguardar um pouco para Angular processar as mudanças e validar o formulário
       console.log('⏳ Aguardando validação do formulário Angular...');
       await this.page.waitForTimeout(3000); // Aumentado para 3 segundos
@@ -647,8 +642,6 @@ class CanopusRPAService {
       }
       await this.page.waitForTimeout(5000); // Aumentado para 5 segundos para garantir
 
-      await this.screenshot('03-after-login');
-
       // Verificar se o login foi bem-sucedido
       const loginSuccessful = await this.verifyLoginSuccess();
       
@@ -686,14 +679,390 @@ class CanopusRPAService {
       }
 
       this.isLoggedIn = true;
-      console.log('✅ Login realizado com sucesso!');
+      console.log('✅ Primeiro login realizado com sucesso!');
       console.log(`   URL atual: ${this.page.url()}`);
+      
+      // Após o primeiro login, fazer login na segunda página
+      console.log('\n🔐 Fazendo login na segunda página do sistema...');
+      await this.loginSecondPage();
       
       return true;
     } catch (error) {
       console.error('❌ Erro ao fazer login:', error.message);
       await this.screenshot('error-login');
       this.isLoggedIn = false;
+      throw error;
+    }
+  }
+
+  /**
+   * Faz login na segunda página do sistema (AFV)
+   */
+  async loginSecondPage() {
+    try {
+      const secondLoginUrl = 'https://afv.consorciocanopus.com.br/Sistema/';
+      
+      console.log(`🔐 Navegando para segunda página de login: ${secondLoginUrl}`);
+      await this.navigateTo(secondLoginUrl);
+      
+      // Aguardar elementos carregarem
+      console.log('⏳ Aguardando elementos da segunda página carregarem...');
+      await this.page.waitForTimeout(3000);
+      
+      // Preencher campo de usuário (formulário HTML simples, não Angular)
+      console.log('📝 Preenchendo campo de usuário...');
+      const usernameField = await this.page.locator('input[name="login"], input#login').first();
+      await usernameField.waitFor({ state: 'visible', timeout: 10000 });
+      await usernameField.click();
+      await this.page.waitForTimeout(200);
+      await usernameField.fill(config.canopus.username);
+      console.log('✅ Usuário preenchido na segunda página');
+      
+      // Preencher campo de senha
+      console.log('📝 Preenchendo campo de senha...');
+      const passwordField = await this.page.locator('input[name="senha"], input#senha').first();
+      await passwordField.waitFor({ state: 'visible', timeout: 10000 });
+      await passwordField.click();
+      await this.page.waitForTimeout(200);
+      await passwordField.fill(config.canopus.password);
+      console.log('✅ Senha preenchida na segunda página');
+      
+      // Aguardar um pouco antes de clicar no botão
+      await this.page.waitForTimeout(1000);
+      
+      // Clicar no botão de login
+      console.log('🔘 Clicando no botão de login...');
+      const loginButton = await this.page.locator('input[type="submit"].btn.btn-primary.btn-block, input[value="Entrar"]').first();
+      await loginButton.waitFor({ state: 'visible', timeout: 10000 });
+      await loginButton.click();
+      console.log('✅ Botão de login clicado');
+      
+      // Aguardar navegação após login
+      console.log('⏳ Aguardando resposta do servidor após segundo login...');
+      await this.page.waitForTimeout(5000);
+      
+      try {
+        await this.page.waitForLoadState('load', { timeout: 30000 });
+        console.log('✅ Segunda página carregada completamente');
+      } catch (e) {
+        await this.page.waitForLoadState('domcontentloaded', { timeout: 15000 });
+        console.log('✅ Segunda página carregada (básico)');
+      }
+      
+      await this.page.waitForTimeout(3000);
+      console.log('✅ Segundo login realizado com sucesso!');
+      console.log(`   URL atual: ${this.page.url()}`);
+      
+    } catch (error) {
+      console.error('❌ Erro ao fazer login na segunda página:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Navega para a página de listagem de planos, seleciona AUTOMOVEIS e captura dados
+   */
+  async navigateToPlansList() {
+    try {
+      const plansUrl = 'https://afv.consorciocanopus.com.br/Sistema/planos/listagem_planos.php';
+      
+      console.log(`📋 Navegando para página de planos: ${plansUrl}`);
+      await this.navigateTo(plansUrl);
+      
+      // Aguardar página carregar completamente
+      console.log('⏳ Aguardando página de planos carregar...');
+      await this.page.waitForTimeout(5000);
+      
+      try {
+        await this.page.waitForLoadState('load', { timeout: 30000 });
+      } catch (e) {
+        await this.page.waitForLoadState('domcontentloaded', { timeout: 15000 });
+      }
+      
+      await this.page.waitForTimeout(3000);
+      
+      // Selecionar "AUTOMOVEIS" no dropdown
+      console.log('🔽 Selecionando "AUTOMOVEIS" no dropdown...');
+      await this.selectAutomoveis();
+      
+      // Aguardar grid atualizar após seleção
+      console.log('⏳ Aguardando grid atualizar...');
+      await this.page.waitForTimeout(5000);
+      
+      // Aguardar tabela estar visível e carregada
+      const table = await this.page.locator('table.table.no-more-tables.table-striped.table-hover.dataTable.no-footer, table.dataTable').first();
+      await table.waitFor({ state: 'visible', timeout: 30000 });
+      await this.page.waitForTimeout(3000);
+      
+      // Capturar screenshot apenas desta página
+      console.log('📸 Capturando screenshot da página de planos...');
+      await this.screenshot('listagem-planos');
+      console.log('✅ Screenshot capturado com sucesso!');
+      
+      // Scrape e salvar dados do grid-body
+      console.log('📊 Extraindo dados do grid...');
+      await this.scrapeAndSaveGridData();
+      console.log('✅ Dados extraídos e salvos com sucesso!');
+      
+    } catch (error) {
+      console.error('❌ Erro ao navegar para página de planos:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Seleciona "AUTOMOVEIS" no dropdown
+   */
+  async selectAutomoveis() {
+    try {
+      // Procurar o span com texto "Selecione..."
+      const selectSpan = await this.page.locator('span:has-text("Selecione...")').first();
+      await selectSpan.waitFor({ state: 'visible', timeout: 15000 });
+      
+      console.log('✅ Span "Selecione..." encontrado');
+      
+      // Clicar no span para abrir o dropdown
+      await selectSpan.click();
+      await this.page.waitForTimeout(1000);
+      
+      // Procurar e clicar na opção "AUTOMOVEIS"
+      // Pode ser um link, option, ou outro elemento dentro do dropdown
+      const automoveisSelectors = [
+        'text="AUTOMOVEIS"',
+        'text="AUTOMÓVEIS"',
+        'text="Automoveis"',
+        'text="Automóveis"',
+        'a:has-text("AUTOMOVEIS")',
+        'a:has-text("AUTOMÓVEIS")',
+        'option:has-text("AUTOMOVEIS")',
+        'option:has-text("AUTOMÓVEIS")',
+        '[value="AUTOMOVEIS"]',
+        '[value="AUTOMÓVEIS"]',
+        'li:has-text("AUTOMOVEIS")',
+        'li:has-text("AUTOMÓVEIS")'
+      ];
+      
+      let optionSelected = false;
+      
+      for (const selector of automoveisSelectors) {
+        try {
+          const option = await this.page.locator(selector).first();
+          if (await option.isVisible({ timeout: 2000 })) {
+            await option.click();
+            console.log(`✅ Opção "AUTOMOVEIS" selecionada (seletor: ${selector})`);
+            optionSelected = true;
+            break;
+          }
+        } catch (e) {
+          // Tentar próximo seletor
+        }
+      }
+      
+      // Se não encontrou, tentar estratégia alternativa: buscar por texto exato
+      if (!optionSelected) {
+        console.log('⚠️  Tentando estratégia alternativa para selecionar AUTOMOVEIS...');
+        try {
+          // Buscar todos os elementos clicáveis que contenham "AUTOMOVEIS" ou "AUTOMÓVEIS"
+          const allElements = await this.page.locator('*').all();
+          for (const element of allElements) {
+            try {
+              const text = await element.textContent();
+              if (text && (text.includes('AUTOMOVEIS') || text.includes('AUTOMÓVEIS') || text.includes('Automoveis') || text.includes('Automóveis'))) {
+                if (await element.isVisible({ timeout: 1000 })) {
+                  await element.click();
+                  console.log('✅ Opção "AUTOMOVEIS" selecionada (busca por texto)');
+                  optionSelected = true;
+                  break;
+                }
+              }
+            } catch (e) {
+              // Continuar
+            }
+          }
+        } catch (e) {
+          // Ignorar
+        }
+      }
+      
+      if (!optionSelected) {
+        throw new Error('Não foi possível encontrar e selecionar a opção "AUTOMOVEIS" no dropdown');
+      }
+      
+      await this.page.waitForTimeout(2000);
+      
+    } catch (error) {
+      console.error('❌ Erro ao selecionar AUTOMOVEIS:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Extrai e salva todos os dados da tabela de planos
+   */
+  async scrapeAndSaveGridData() {
+    try {
+      // Aguardar tabela estar presente
+      const tableSelector = 'table.table.no-more-tables.table-striped.table-hover.dataTable.no-footer, table.dataTable, table#table';
+      const table = await this.page.locator(tableSelector).first();
+      await table.waitFor({ state: 'visible', timeout: 30000 });
+      
+      // Extrair todos os dados da tabela de forma estruturada
+      const tableData = await table.evaluate((tableElement) => {
+        const data = {
+          headers: [],
+          rows: [],
+          totalRows: 0
+        };
+        
+        // Extrair cabeçalhos do thead
+        const thead = tableElement.querySelector('thead');
+        if (thead) {
+          const headerRow = thead.querySelector('tr');
+          if (headerRow) {
+            const headers = headerRow.querySelectorAll('th');
+            headers.forEach((th) => {
+              const headerText = (th.innerText || th.textContent || '').trim();
+              data.headers.push(headerText);
+            });
+          }
+        }
+        
+        // Extrair dados do tbody
+        const tbody = tableElement.querySelector('tbody');
+        if (tbody) {
+          const rows = tbody.querySelectorAll('tr');
+          rows.forEach((row, rowIndex) => {
+            const cells = row.querySelectorAll('td');
+            const rowData = {
+              rowNumber: rowIndex + 1,
+              data: {}
+            };
+            
+            cells.forEach((cell, cellIndex) => {
+              // Usar o cabeçalho correspondente como chave, ou criar uma chave genérica
+              const headerKey = data.headers[cellIndex] || `coluna_${cellIndex + 1}`;
+              
+              // Extrair texto limpo da célula
+              let cellText = (cell.innerText || cell.textContent || '').trim();
+              
+              // Remover espaços extras e quebras de linha
+              cellText = cellText.replace(/\s+/g, ' ').trim();
+              
+              // Armazenar dados estruturados
+              rowData.data[headerKey] = cellText;
+              
+              // Também armazenar dados por índice para referência
+              rowData.data[`_col_${cellIndex}`] = cellText;
+            });
+            
+            data.rows.push(rowData);
+          });
+        }
+        
+        data.totalRows = data.rows.length;
+        
+        return data;
+      });
+      
+      // Criar diretório para dados se não existir
+      const dataDir = path.join(process.cwd(), 'data');
+      if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+      }
+      
+      // Salvar dados em JSON
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const jsonFilename = `table-data-automoveis-${timestamp}.json`;
+      const jsonFilepath = path.join(dataDir, jsonFilename);
+      
+      // Preparar dados para salvar (remover campos auxiliares _col_*)
+      const cleanTableData = {
+        extractedAt: new Date().toISOString(),
+        headers: tableData.headers,
+        totalRows: tableData.totalRows,
+        rows: tableData.rows.map(row => {
+          const cleanRow = { ...row.data };
+          // Remover campos auxiliares
+          Object.keys(cleanRow).forEach(key => {
+            if (key.startsWith('_col_')) {
+              delete cleanRow[key];
+            }
+          });
+          return cleanRow;
+        })
+      };
+      
+      fs.writeFileSync(jsonFilepath, JSON.stringify(cleanTableData, null, 2), 'utf-8');
+      console.log(`💾 Dados salvos em JSON: ${jsonFilename}`);
+      
+      // Salvar também em formato CSV para fácil importação
+      const csvFilename = `table-data-automoveis-${timestamp}.csv`;
+      const csvFilepath = path.join(dataDir, csvFilename);
+      
+      let csvContent = '';
+      // Cabeçalho CSV
+      if (tableData.headers.length > 0) {
+        csvContent += tableData.headers.map(h => `"${h}"`).join(',') + '\n';
+      }
+      
+      // Dados CSV
+      tableData.rows.forEach((row) => {
+        const csvRow = tableData.headers.map((header, index) => {
+          const value = row.data[header] || row.data[`_col_${index}`] || '';
+          // Escapar aspas e quebras de linha no CSV
+          return `"${value.replace(/"/g, '""')}"`;
+        });
+        csvContent += csvRow.join(',') + '\n';
+      });
+      
+      fs.writeFileSync(csvFilepath, csvContent, 'utf-8');
+      console.log(`💾 Dados salvos em CSV: ${csvFilename}`);
+      
+      // Salvar também em formato texto legível
+      const txtFilename = `table-data-automoveis-${timestamp}.txt`;
+      const txtFilepath = path.join(dataDir, txtFilename);
+      
+      let textContent = '=== DADOS DA TABELA - AUTOMOVEIS ===\n\n';
+      textContent += `Data/Hora de Extração: ${new Date().toLocaleString('pt-BR')}\n`;
+      textContent += `Total de Registros: ${tableData.totalRows}\n\n`;
+      
+      if (tableData.headers.length > 0) {
+        textContent += '=== COLUNAS ===\n';
+        tableData.headers.forEach((header, index) => {
+          textContent += `  ${index + 1}. ${header}\n`;
+        });
+        textContent += '\n';
+      }
+      
+      if (tableData.rows.length > 0) {
+        textContent += '=== DADOS ESTRUTURADOS ===\n\n';
+        tableData.rows.forEach((row, index) => {
+          textContent += `--- Registro ${index + 1} ---\n`;
+          tableData.headers.forEach((header, headerIndex) => {
+            const value = row.data[header] || row.data[`_col_${headerIndex}`] || '';
+            textContent += `  ${header}: ${value}\n`;
+          });
+          textContent += '\n';
+        });
+      }
+      
+      fs.writeFileSync(txtFilepath, textContent, 'utf-8');
+      console.log(`💾 Dados salvos em TXT: ${txtFilename}`);
+      
+      // Exibir resumo no console
+      console.log(`\n📊 Resumo dos dados extraídos:`);
+      console.log(`   - Total de registros: ${tableData.totalRows}`);
+      console.log(`   - Total de colunas: ${tableData.headers.length}`);
+      console.log(`   - Colunas: ${tableData.headers.join(', ')}`);
+      console.log(`   - Arquivos salvos em: ./data/`);
+      console.log(`     • JSON: ${jsonFilename}`);
+      console.log(`     • CSV: ${csvFilename}`);
+      console.log(`     • TXT: ${txtFilename}`);
+      
+      return cleanTableData;
+      
+    } catch (error) {
+      console.error('❌ Erro ao extrair dados do grid:', error.message);
       throw error;
     }
   }

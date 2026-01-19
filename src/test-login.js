@@ -37,21 +37,13 @@ async function testLogin() {
     
     if (loginSuccess) {
       console.log('\n✅✅✅ LOGIN AUTOMÁTICO FUNCIONANDO CORRETAMENTE! ✅✅✅\n');
-      console.log('📸 Screenshots salvos em: ./screenshots/');
-      console.log('   - 01-login-page.png: Página de login');
-      console.log('   - 02-credentials-filled.png: Credenciais preenchidas');
-      console.log('   - 03-after-login.png: Após o login\n');
       
-      // Verificar se ainda está logado após alguns segundos
-      console.log('⏳ Aguardando 5 segundos para verificar estabilidade da sessão...');
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      // Navegar para página de listagem de planos e capturar screenshot
+      console.log('📋 Navegando para página de listagem de planos...\n');
+      await canopusRPA.navigateToPlansList();
       
-      const stillLoggedIn = await canopusRPA.verifyLoginSuccess();
-      if (stillLoggedIn) {
-        console.log('✅ Sessão estável e ativa!\n');
-      } else {
-        console.log('⚠️  Aviso: Sessão pode ter expirado ou houve redirecionamento\n');
-      }
+      console.log('\n✅✅✅ PROCESSO COMPLETO FINALIZADO COM SUCESSO! ✅✅✅\n');
+      console.log('📸 Screenshot salvo em: ./screenshots/listagem-planos-*.png\n');
     } else {
       console.log('\n❌❌❌ LOGIN FALHOU ❌❌❌\n');
       console.log('💡 Verifique:');
