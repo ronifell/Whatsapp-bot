@@ -1,0 +1,32 @@
+{
+  "name": "cotafacil-automacao",
+  "version": "1.0.0",
+  "description": "Automação de cotação de consórcio via WhatsApp + IA + RPA",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test:rpa": "node src/test-rpa.js",
+    "test:login": "node src/test-login.js",
+    "install:browsers": "npx playwright install chromium"
+  },
+  "keywords": [
+    "whatsapp",
+    "automation",
+    "rpa",
+    "consortium",
+    "playwright"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.7.9",
+    "playwright": "^1.49.1",
+    "dotenv": "^16.4.7",
+    "openai": "^4.77.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
+}
