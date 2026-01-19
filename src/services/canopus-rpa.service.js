@@ -789,6 +789,14 @@ class CanopusRPAService {
       console.log('⏳ Aguardando grid atualizar...');
       await this.page.waitForTimeout(5000);
       
+      // Selecionar radio button para IPCA (mudar de fabricante para IPCA)
+      console.log('📻 Selecionando radio button IPCA...');
+      await this.selectReajusteIPCA();
+      
+      // Aguardar tabela atualizar após mudança do radio button
+      console.log('⏳ Aguardando tabela atualizar após seleção do radio button...');
+      await this.page.waitForTimeout(5000);
+      
       // Aguardar tabela estar visível e carregada
       const table = await this.page.locator('table.table.no-more-tables.table-striped.table-hover.dataTable.no-footer, table.dataTable').first();
       await table.waitFor({ state: 'visible', timeout: 30000 });
@@ -806,6 +814,217 @@ class CanopusRPAService {
       
     } catch (error) {
       console.error('❌ Erro ao navegar para página de planos:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Seleciona o radio button para reajuste IPCA
+   */
+  async selectReajusteIPCA() {
+    try {
+      console.log('🔍 Procurando radio button IPCA...');
+      
+      // Primeiro, verificar qual radio está selecionado atualmente
+      const currentSelection = await this.page.evaluate(() => {
+        const allRadios = document.querySelectorAll('input[type="radio"]');
+        for (const radio of allRadios) {
+          if (radio.checked) {
+            return {
+              id: radio.id,
+              name: radio.name,
+              value: radio.value,
+              checked: true
+            };
+          }
+        }
+        return null;
+      });
+      
+      if (currentSelection) {
+        console.log(`ℹ️  Radio atual selecionado: ${currentSelection.value || currentSelection.id || 'desconhecido'}`);
+      }
+      
+      // Procurar o span com id "ln_reajuste_ipca"
+      const ipcaSpan = await this.page.locator('span#ln_reajuste_ipca').first();
+      await ipcaSpan.waitFor({ state: 'visible', timeout: 15000 });
+      console.log('✅ Span "ln_reajuste_ipca" encontrado');
+      
+      // Usar JavaScript para encontrar e selecionar o radio button de forma mais robusta
+      const radioFound = await this.page.evaluate(() => {
+        const span = document.getElementById('ln_reajuste_ipca');
+        if (!span) {
+          console.log('Span ln_reajuste_ipca não encontrado');
+          return false;
+        }
+        
+        // Estratégia 1: Procurar radio dentro do span
+        let radio = span.querySelector('input[type="radio"]');
+        
+        // Estratégia 2: Procurar no parent
+        if (!radio) {
+          let parent = span.parentElement;
+          let depth = 0;
+          while (parent && depth < 5) {
+            radio = parent.querySelector('input[type="radio"]');
+            if (radio) break;
+            parent = parent.parentElement;
+            depth++;
+          }
+        }
+        
+        // Estratégia 3: Procurar por name comum (geralmente radio buttons têm o mesmo name)
+        if (!radio) {
+          // Procurar todos os radios e encontrar o que está relacionado ao span
+          const allRadios = document.querySelectorAll('input[type="radio"]');
+          const spanText = span.textContent || span.innerText || '';
+          
+          for (const r of allRadios) {
+            // Verificar se o radio está próximo ao span
+            const radioParent = r.parentElement;
+            if (radioParent && (radioParent.contains(span) || span.parentElement?.contains(r))) {
+              // Verificar se o value ou id contém "ipca"
+              const value = (r.value || '').toLowerCase();
+              const id = (r.id || '').toLowerCase();
+              if (value.includes('ipca') || id.includes('ipca')) {
+                radio = r;
+                break;
+              }
+            }
+          }
+        }
+        
+        // Estratégia 4: Procurar por value ou id contendo "ipca"
+        if (!radio) {
+          const allRadios = document.querySelectorAll('input[type="radio"]');
+          for (const r of allRadios) {
+            const value = (r.value || '').toLowerCase();
+            const id = (r.id || '').toLowerCase();
+            const name = (r.name || '').toLowerCase();
+            
+            if (value.includes('ipca') || id.includes('ipca') || name.includes('ipca')) {
+              radio = r;
+              break;
+            }
+          }
+        }
+        
+        if (radio) {
+          // Desmarcar todos os radios do mesmo grupo (name)
+          if (radio.name) {
+            const sameGroupRadios = document.querySelectorAll(`input[type="radio"][name="${radio.name}"]`);
+            sameGroupRadios.forEach(r => {
+              r.checked = false;
+              // Disparar evento change
+              r.dispatchEvent(new Event('change', { bubbles: true }));
+            });
+          }
+          
+          // Marcar o radio IPCA
+          radio.checked = true;
+          
+          // Disparar eventos necessários
+          radio.dispatchEvent(new Event('click', { bubbles: true }));
+          radio.dispatchEvent(new Event('change', { bubbles: true }));
+          radio.dispatchEvent(new Event('input', { bubbles: true }));
+          
+          // Se o radio está dentro de um form, disparar evento no form também
+          const form = radio.closest('form');
+          if (form) {
+            form.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          
+          console.log('Radio IPCA selecionado:', {
+            id: radio.id,
+            name: radio.name,
+            value: radio.value,
+            checked: radio.checked
+          });
+          
+          return true;
+        }
+        
+        return false;
+      });
+      
+      if (!radioFound) {
+        // Tentar estratégia alternativa: clicar diretamente no span
+        console.log('⚠️  Tentando clicar diretamente no span...');
+        await ipcaSpan.click();
+        await this.page.waitForTimeout(1000);
+        
+        // Verificar se funcionou
+        const clicked = await this.page.evaluate(() => {
+          const span = document.getElementById('ln_reajuste_ipca');
+          if (span) {
+            // Procurar radio próximo novamente
+            let radio = span.querySelector('input[type="radio"]');
+            if (!radio) {
+              let parent = span.parentElement;
+              let depth = 0;
+              while (parent && depth < 5) {
+                radio = parent.querySelector('input[type="radio"]');
+                if (radio) break;
+                parent = parent.parentElement;
+                depth++;
+              }
+            }
+            return radio && radio.checked;
+          }
+          return false;
+        });
+        
+        if (!clicked) {
+          throw new Error('Não foi possível selecionar o radio button IPCA');
+        }
+      }
+      
+      // Aguardar um pouco e verificar se a seleção foi aplicada
+      await this.page.waitForTimeout(2000);
+      
+      // Verificar se o radio IPCA está realmente selecionado
+      const isSelected = await this.page.evaluate(() => {
+        const span = document.getElementById('ln_reajuste_ipca');
+        if (span) {
+          // Procurar radio relacionado
+          let radio = span.querySelector('input[type="radio"]');
+          if (!radio) {
+            let parent = span.parentElement;
+            let depth = 0;
+            while (parent && depth < 5) {
+              radio = parent.querySelector('input[type="radio"]');
+              if (radio) break;
+              parent = parent.parentElement;
+              depth++;
+            }
+          }
+          
+          // Se ainda não encontrou, procurar por value/id
+          if (!radio) {
+            const allRadios = document.querySelectorAll('input[type="radio"]');
+            for (const r of allRadios) {
+              const value = (r.value || '').toLowerCase();
+              const id = (r.id || '').toLowerCase();
+              if (value.includes('ipca') || id.includes('ipca')) {
+                radio = r;
+                break;
+              }
+            }
+          }
+          
+          return radio ? radio.checked : false;
+        }
+        return false;
+      });
+      
+      if (isSelected) {
+        console.log('✅ Radio button IPCA selecionado com sucesso!');
+      } else {
+        console.warn('⚠️  Aviso: Não foi possível verificar se o radio IPCA está selecionado');
+      }
+      
+    } catch (error) {
+      console.error('❌ Erro ao selecionar radio button IPCA:', error.message);
       throw error;
     }
   }
@@ -897,17 +1116,13 @@ class CanopusRPAService {
   }
 
   /**
-   * Extrai e salva todos os dados da tabela de planos
+   * Extrai dados de uma página específica da tabela
    */
-  async scrapeAndSaveGridData() {
-    try {
-      // Aguardar tabela estar presente
-      const tableSelector = 'table.table.no-more-tables.table-striped.table-hover.dataTable.no-footer, table.dataTable, table#table';
-      const table = await this.page.locator(tableSelector).first();
-      await table.waitFor({ state: 'visible', timeout: 30000 });
-      
-      // Extrair todos os dados da tabela de forma estruturada
-      const tableData = await table.evaluate((tableElement) => {
+  async extractTablePageData() {
+    const tableSelector = 'table.table.no-more-tables.table-striped.table-hover.dataTable.no-footer, table.dataTable, table#table';
+    const table = await this.page.locator(tableSelector).first();
+    
+    return await table.evaluate((tableElement) => {
         const data = {
           headers: [],
           rows: [],
@@ -959,10 +1174,632 @@ class CanopusRPAService {
           });
         }
         
-        data.totalRows = data.rows.length;
+      return data;
+    });
+  }
+
+  /**
+   * Navega para uma página específica da paginação
+   */
+  async navigateToPage(pageNumber) {
+    try {
+      const pagination = await this.page.locator('div.dataTables_paginate.paging_bootstrap.pagination, div.dataTables_paginate').first();
+      await pagination.waitFor({ state: 'visible', timeout: 10000 });
+      
+      // Primeiro, tentar scrollar a paginação para tornar a página visível
+      await pagination.evaluate((paginationElement, targetPage) => {
+        // Scroll para tentar tornar a página visível
+        const pageLinks = paginationElement.querySelectorAll('a, button, li');
+        let found = false;
         
-        return data;
+        for (const link of pageLinks) {
+          const text = (link.textContent || link.innerText || '').trim();
+          const pageNum = parseInt(text);
+          if (pageNum === targetPage) {
+            // Se encontrou, scrollar para tornar visível
+            link.scrollIntoView({ behavior: 'instant', block: 'center' });
+            found = true;
+            break;
+          }
+        }
+        
+        // Se não encontrou, scrollar para a direita para revelar mais páginas
+        if (!found) {
+          const scrollContainer = paginationElement;
+          const initialScroll = scrollContainer.scrollLeft;
+          scrollContainer.scrollLeft += 500; // Scroll significativo
+          
+          // Verificar novamente após scroll
+          for (const link of pageLinks) {
+            const text = (link.textContent || link.innerText || '').trim();
+            const pageNum = parseInt(text);
+            if (pageNum === targetPage) {
+              link.scrollIntoView({ behavior: 'instant', block: 'center' });
+              found = true;
+              break;
+            }
+          }
+        }
+      }, pageNumber);
+      
+      await this.page.waitForTimeout(500); // Aguardar scroll completar
+      
+      // Procurar o link/button da página específica
+      const pageLink = await pagination.locator(`a:has-text("${pageNumber}"), li:has-text("${pageNumber}") a, button:has-text("${pageNumber}")`).first();
+      
+      if (await pageLink.isVisible({ timeout: 3000 })) {
+        // Verificar se não está desabilitado
+        const isDisabled = await pageLink.evaluate(el => {
+          return el.classList.contains('disabled') || el.classList.contains('paginate_button_disabled') || el.getAttribute('disabled') !== null;
+        });
+        
+        if (!isDisabled) {
+          // Scrollar para tornar o elemento visível antes de clicar
+          await pageLink.scrollIntoViewIfNeeded();
+          await this.page.waitForTimeout(300);
+          
+          await pageLink.click();
+          await this.page.waitForTimeout(3000); // Aguardar tabela atualizar
+          
+          // Aguardar tabela carregar
+          const table = await this.page.locator('table.dataTable, table#table').first();
+          await table.waitFor({ state: 'visible', timeout: 15000 });
+          await this.page.waitForTimeout(2000);
+          
+          return true;
+        }
+      }
+      
+      return false;
+    } catch (error) {
+      console.warn(`⚠️  Erro ao navegar para página ${pageNumber}:`, error.message);
+      return false;
+    }
+  }
+
+  /**
+   * Verifica se estamos na última página
+   */
+  async isLastPage() {
+    try {
+      const pagination = await this.page.locator('div.dataTables_paginate.paging_bootstrap.pagination, div.dataTables_paginate').first();
+      await pagination.waitFor({ state: 'visible', timeout: 10000 });
+      
+      // Verificar se o botão Next está desabilitado
+      const nextButton = await pagination.locator('a.paginate_button.next, a.next, button.next, a:has-text("Next"), a:has-text("Próximo"), a:has-text(">"), li.next a').first();
+      
+      if (await nextButton.isVisible({ timeout: 2000 })) {
+        const isDisabled = await nextButton.evaluate(el => {
+          return el.classList.contains('disabled') || 
+                 el.classList.contains('paginate_button_disabled') || 
+                 el.getAttribute('disabled') !== null ||
+                 el.getAttribute('aria-disabled') === 'true';
+        });
+        
+        if (isDisabled) {
+          return true; // Estamos na última página
+        }
+      }
+      
+      return false;
+    } catch (error) {
+      // Se não conseguir verificar, assumir que não é a última página
+      return false;
+    }
+  }
+
+  /**
+   * Obtém o número da página atual
+   */
+  async getCurrentPageNumber() {
+    try {
+      const pagination = await this.page.locator('div.dataTables_paginate.paging_bootstrap.pagination, div.dataTables_paginate').first();
+      await pagination.waitFor({ state: 'visible', timeout: 10000 });
+      
+      const currentPage = await pagination.evaluate((paginationElement) => {
+        // Procurar o link/button ativo
+        const activeLink = paginationElement.querySelector('a.paginate_button.current, li.active a, a.active, .active a');
+        if (activeLink) {
+          const text = (activeLink.textContent || activeLink.innerText || '').trim();
+          const pageNum = parseInt(text);
+          if (!isNaN(pageNum) && pageNum > 0) {
+            return pageNum;
+          }
+        }
+        
+        // Se não encontrou, procurar em todos os links
+        const allLinks = paginationElement.querySelectorAll('a, button, li');
+        for (const link of allLinks) {
+          if (link.classList.contains('active') || link.classList.contains('current')) {
+            const text = (link.textContent || link.innerText || '').trim();
+            const pageNum = parseInt(text);
+            if (!isNaN(pageNum) && pageNum > 0) {
+              return pageNum;
+            }
+          }
+        }
+        
+        return null;
       });
+      
+      return currentPage;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /**
+   * Navega para a próxima página usando o botão "Next"
+   */
+  async navigateToNextPage() {
+    try {
+      // Primeiro verificar se já estamos na última página
+      const isLast = await this.isLastPage();
+      if (isLast) {
+        console.log('ℹ️  Já estamos na última página');
+        return false;
+      }
+      
+      const pagination = await this.page.locator('div.dataTables_paginate.paging_bootstrap.pagination, div.dataTables_paginate').first();
+      await pagination.waitFor({ state: 'visible', timeout: 10000 });
+      
+      // Obter página atual antes de navegar
+      const currentPageBefore = await this.getCurrentPageNumber();
+      
+      // Procurar botão "Next" ou "Próximo"
+      const nextButton = await pagination.locator('a.paginate_button.next, a.next, button.next, a:has-text("Next"), a:has-text("Próximo"), a:has-text(">"), li.next a').first();
+      
+      if (await nextButton.isVisible({ timeout: 2000 })) {
+        const isDisabled = await nextButton.evaluate(el => {
+          return el.classList.contains('disabled') || 
+                 el.classList.contains('paginate_button_disabled') || 
+                 el.getAttribute('disabled') !== null ||
+                 el.getAttribute('aria-disabled') === 'true';
+        });
+        
+        if (isDisabled) {
+          console.log('ℹ️  Botão Next está desabilitado, estamos na última página');
+          return false;
+        }
+        
+        await nextButton.scrollIntoViewIfNeeded();
+        await this.page.waitForTimeout(300);
+        await nextButton.click();
+        await this.page.waitForTimeout(3000);
+        
+        // Aguardar tabela carregar
+        const table = await this.page.locator('table.dataTable, table#table').first();
+        await table.waitFor({ state: 'visible', timeout: 15000 });
+        await this.page.waitForTimeout(2000);
+        
+        // Verificar se realmente mudou de página
+        const currentPageAfter = await this.getCurrentPageNumber();
+        if (currentPageAfter && currentPageBefore && currentPageAfter > currentPageBefore) {
+          return true;
+        } else if (currentPageAfter && currentPageAfter !== currentPageBefore) {
+          return true; // Página mudou
+        } else {
+          // Página não mudou, pode estar na última
+          const isLastNow = await this.isLastPage();
+          if (isLastNow) {
+            return false;
+          }
+          // Se não é a última mas não mudou, pode ser um problema, mas tentar continuar
+          return true;
+        }
+      }
+      
+      return false;
+    } catch (error) {
+      console.warn('⚠️  Erro ao navegar para próxima página:', error.message);
+      return false;
+    }
+  }
+
+  /**
+   * Obtém o número total de páginas da paginação
+   */
+  async getTotalPages() {
+    try {
+      // Primeiro, tentar obter do DataTables info (se disponível)
+      const tableInfo = await this.page.locator('#table_info, .dataTables_info').first();
+      if (await tableInfo.isVisible({ timeout: 2000 })) {
+        const infoText = await tableInfo.textContent();
+        // Procurar padrões como "Mostrando 1 a 10 de 190 registros" ou "Showing 1 to 10 of 190 entries"
+        const match = infoText.match(/(?:de|of)\s*(\d+)/i);
+        if (match && match[1]) {
+          const totalRecords = parseInt(match[1]);
+          // Assumir que cada página tem aproximadamente o mesmo número de registros
+          // Pegar o número de registros na primeira página
+          const firstPageRows = await this.page.locator('table#table tbody tr').count();
+          if (firstPageRows > 0) {
+            const estimatedPages = Math.ceil(totalRecords / firstPageRows);
+            console.log(`ℹ️  Total de registros: ${totalRecords}, Registros por página: ${firstPageRows}, Páginas estimadas: ${estimatedPages}`);
+            return estimatedPages;
+          }
+        }
+      }
+      
+      // Se não encontrou no info, tentar obter da paginação com scroll
+      const pagination = await this.page.locator('div.dataTables_paginate.paging_bootstrap.pagination, div.dataTables_paginate').first();
+      await pagination.waitFor({ state: 'visible', timeout: 10000 });
+      
+      // Scroll através da paginação para revelar todos os números de página
+      // Primeiro, fazer scroll manualmente no Playwright
+      const paginationElement = await pagination.elementHandle();
+      if (paginationElement) {
+        // Scroll múltiplas vezes para revelar todas as páginas
+        for (let i = 0; i < 20; i++) {
+          await paginationElement.evaluate((el) => {
+            el.scrollLeft += 200;
+          });
+          await this.page.waitForTimeout(100);
+        }
+        
+        // Voltar ao início
+        await paginationElement.evaluate((el) => {
+          el.scrollLeft = 0;
+        });
+        await this.page.waitForTimeout(200);
+      }
+      
+      // Agora extrair todos os números de página
+      const totalPages = await pagination.evaluate((paginationElement) => {
+        let maxPage = 1;
+        const allPageNumbers = new Set();
+        
+        // Função para extrair números de página visíveis
+        const extractPageNumbers = () => {
+          const pageLinks = paginationElement.querySelectorAll('a, button, li');
+          pageLinks.forEach((link) => {
+            const text = (link.textContent || link.innerText || '').trim();
+            const pageNum = parseInt(text);
+            if (!isNaN(pageNum) && pageNum > 0) {
+              allPageNumbers.add(pageNum);
+              if (pageNum > maxPage) {
+                maxPage = pageNum;
+              }
+            }
+          });
+        };
+        
+        // Extrair números iniciais
+        extractPageNumbers();
+        
+        // Scroll para a direita para revelar mais páginas
+        const scrollContainer = paginationElement;
+        let previousScrollLeft = scrollContainer.scrollLeft;
+        let scrollAttempts = 0;
+        const maxScrollAttempts = 30;
+        
+        while (scrollAttempts < maxScrollAttempts) {
+          // Scroll para a direita
+          scrollContainer.scrollLeft += 200;
+          
+          // Extrair números de página novamente
+          const beforeCount = allPageNumbers.size;
+          extractPageNumbers();
+          const afterCount = allPageNumbers.size;
+          
+          // Se não encontrou novos números e não mudou a posição do scroll, parar
+          if (afterCount === beforeCount && scrollContainer.scrollLeft === previousScrollLeft) {
+            break;
+          }
+          
+          previousScrollLeft = scrollContainer.scrollLeft;
+          scrollAttempts++;
+        }
+        
+        // Também verificar se há informação de total de páginas no texto
+        const paginationText = paginationElement.textContent || '';
+        const match = paginationText.match(/(\d+)\s*(?:de|of|\/)\s*(\d+)/i);
+        if (match && match[2]) {
+          const total = parseInt(match[2]);
+          if (!isNaN(total) && total > maxPage) {
+            maxPage = total;
+          }
+        }
+        
+        return maxPage;
+      });
+      
+      console.log(`📚 Total de páginas detectadas: ${totalPages}`);
+      return totalPages;
+    } catch (error) {
+      console.warn('⚠️  Erro ao obter total de páginas:', error.message);
+      // Se falhar, tentar usar estratégia de "Next" button para contar
+      return null; // Retornar null para usar estratégia alternativa
+    }
+  }
+
+  /**
+   * Extrai e salva todos os dados da tabela de planos de todas as páginas
+   */
+  async scrapeAndSaveGridData() {
+    try {
+      // Aguardar tabela estar presente
+      const tableSelector = 'table.table.no-more-tables.table-striped.table-hover.dataTable.no-footer, table.dataTable, table#table';
+      const table = await this.page.locator(tableSelector).first();
+      await table.waitFor({ state: 'visible', timeout: 30000 });
+      
+      console.log('📄 Extraindo dados de todas as páginas...');
+      
+      // Extrair cabeçalhos da primeira página
+      const firstPageData = await this.extractTablePageData();
+      const headers = firstPageData.headers;
+      let allRows = [...firstPageData.rows];
+      
+      console.log(`✅ Página 1 extraída: ${firstPageData.rows.length} registros`);
+      
+      // Obter total de páginas
+      let totalPages = await this.getTotalPages();
+      
+      // Se detectou menos de 19 páginas mas sabemos que há 19, forçar 19
+      if (totalPages && totalPages < 19) {
+        console.log(`⚠️  Detectado ${totalPages} páginas, mas sabemos que há 19. Tentando detectar novamente...`);
+        // Tentar obter novamente com mais scroll
+        const retryTotalPages = await this.getTotalPages();
+        if (retryTotalPages && retryTotalPages > totalPages) {
+          totalPages = retryTotalPages;
+        }
+        // Se ainda não detectou 19, usar estratégia de Next button que é mais confiável
+        if (totalPages < 19) {
+          console.log(`⚠️  Usando estratégia de Next button para garantir todas as 19 páginas`);
+          totalPages = null; // Forçar uso da estratégia Next
+        }
+      }
+      
+      // Se não conseguiu obter total de páginas ou detectou menos que o esperado, usar estratégia de "Next" button
+      if (!totalPages || totalPages < 2) {
+        console.log('⚠️  Não foi possível determinar total de páginas, usando estratégia de navegação sequencial...');
+        
+        // Usar estratégia de "Next" button até não conseguir mais avançar
+        let currentPage = 1;
+        let canContinue = true;
+        const expectedPages = 19; // Sabemos que há 19 páginas
+        const maxPages = 25; // Limite máximo para prevenir loops infinitos (um pouco acima do esperado)
+        let consecutiveFailures = 0;
+        const maxConsecutiveFailures = 3;
+        let lastPageData = null; // Para detectar se voltamos para uma página já visitada
+        
+        while (canContinue && currentPage < maxPages) {
+          // Se já extraímos 19 páginas e o Next ainda está habilitado, continuar
+          // Mas verificar se não estamos em loop
+          if (currentPage >= expectedPages) {
+            const isLast = await this.isLastPage();
+            if (isLast) {
+              console.log(`ℹ️  Detectado que estamos na última página (${currentPage}), finalizando...`);
+              break;
+            }
+            // Se não é a última mas já temos 19, verificar se estamos vendo dados novos
+            console.log(`ℹ️  Já extraímos ${currentPage} páginas, verificando se há mais...`);
+          }
+          
+          canContinue = await this.navigateToNextPage();
+          if (canContinue) {
+            consecutiveFailures = 0; // Reset contador de falhas
+            currentPage++;
+            console.log(`📄 Navegando para página ${currentPage}...`);
+            
+            // Extrair dados desta página
+            const pageData = await this.extractTablePageData();
+            
+            // Verificar se há dados (se não houver, pode ter chegado ao fim)
+            if (pageData.rows.length === 0) {
+              console.log('ℹ️  Nenhum dado encontrado nesta página, finalizando...');
+              break;
+            }
+            
+            // Verificar se estamos vendo dados duplicados (mesma primeira linha)
+            if (allRows.length > 0 && pageData.rows.length > 0) {
+              const lastRowFirstCell = allRows[allRows.length - 1].data[headers[0] || 'Nome do bem'];
+              const currentRowFirstCell = pageData.rows[0].data[headers[0] || 'Nome do bem'];
+              if (lastRowFirstCell === currentRowFirstCell) {
+                console.log('⚠️  Dados duplicados detectados, pode ter voltado para página anterior. Verificando...');
+                // Verificar se é realmente duplicado ou se é apenas coincidência
+                // Comparar mais linhas
+                let duplicateCount = 0;
+                const compareRows = Math.min(3, Math.min(allRows.length, pageData.rows.length));
+                for (let i = 0; i < compareRows; i++) {
+                  const oldRow = allRows[allRows.length - compareRows + i];
+                  const newRow = pageData.rows[i];
+                  if (oldRow && newRow && oldRow.data[headers[0]] === newRow.data[headers[0]]) {
+                    duplicateCount++;
+                  }
+                }
+                if (duplicateCount >= 2) {
+                  console.log('⚠️  Múltiplas linhas duplicadas detectadas, finalizando...');
+                  break;
+                }
+              }
+            }
+            
+            // Verificar se voltamos para uma página já visitada (comparar com dados anteriores)
+            if (lastPageData && pageData.rows.length > 0) {
+              const firstRowCurrent = pageData.rows[0].data[headers[0] || 'Nome do bem'];
+              const firstRowLast = lastPageData.rows[0].data[headers[0] || 'Nome do bem'];
+              if (firstRowCurrent === firstRowLast) {
+                console.log('⚠️  Parece que voltamos para uma página já visitada, finalizando...');
+                break;
+              }
+            }
+            
+            // Ajustar números de linha para continuidade
+            const startRowNumber = allRows.length + 1;
+            pageData.rows.forEach((row, index) => {
+              row.rowNumber = startRowNumber + index;
+              allRows.push(row);
+            });
+            
+            console.log(`✅ Página ${currentPage} extraída: ${pageData.rows.length} registros (Total acumulado: ${allRows.length})`);
+            
+            // Salvar dados desta página para comparação futura
+            lastPageData = pageData;
+            
+            await this.page.waitForTimeout(1000);
+          } else {
+            consecutiveFailures++;
+            if (consecutiveFailures >= maxConsecutiveFailures) {
+              console.log('ℹ️  Múltiplas tentativas falharam, finalizando...');
+              break;
+            } else {
+              console.log(`⚠️  Falha ao navegar (tentativa ${consecutiveFailures}/${maxConsecutiveFailures}), tentando novamente...`);
+              await this.page.waitForTimeout(2000);
+            }
+          }
+        }
+        
+        if (currentPage >= maxPages) {
+          console.warn(`⚠️  Limite máximo de ${maxPages} páginas atingido, parando extração`);
+        }
+        
+        totalPages = currentPage;
+        console.log(`📚 Total de páginas processadas: ${totalPages}`);
+      } else {
+        console.log(`📚 Total de páginas encontradas: ${totalPages}`);
+        
+        // Extrair dados das páginas restantes
+        // Usar estratégia híbrida: tentar navegar diretamente, mas usar Next como fallback
+        const expectedPages = 19;
+        let lastExtractedPage = 1;
+        let consecutiveFailures = 0;
+        const maxConsecutiveFailures = 3;
+        
+        for (let pageNum = 2; pageNum <= Math.max(totalPages, expectedPages) && pageNum <= 25; pageNum++) {
+          // Verificar se estamos na última página antes de tentar navegar
+          if (pageNum > 2) {
+            const isLast = await this.isLastPage();
+            if (isLast && lastExtractedPage >= expectedPages) {
+              console.log(`ℹ️  Detectado que estamos na última página (${lastExtractedPage}), finalizando...`);
+              break;
+            }
+          }
+          
+          console.log(`📄 Tentando navegar para página ${pageNum}...`);
+          
+          let navigated = false;
+          
+          // Primeiro tentar navegar diretamente para a página
+          if (pageNum <= totalPages) {
+            navigated = await this.navigateToPage(pageNum);
+          }
+          
+          // Se falhou, usar botão Next
+          if (!navigated) {
+            console.log(`⚠️  Navegação direta falhou, usando botão Next para página ${pageNum}...`);
+            // Se não estamos na página anterior, navegar até lá primeiro
+            const currentPage = await this.getCurrentPageNumber();
+            if (currentPage && currentPage < pageNum - 1) {
+              // Navegar usando Next até chegar na página desejada
+              for (let i = currentPage; i < pageNum - 1; i++) {
+                const nextSuccess = await this.navigateToNextPage();
+                if (!nextSuccess) {
+                  console.warn(`⚠️  Não foi possível chegar na página ${pageNum}`);
+                  break;
+                }
+                await this.page.waitForTimeout(1000);
+              }
+            }
+            navigated = await this.navigateToNextPage();
+          }
+          
+          if (!navigated) {
+            consecutiveFailures++;
+            if (consecutiveFailures >= maxConsecutiveFailures) {
+              console.warn(`⚠️  Múltiplas falhas consecutivas (${consecutiveFailures}), finalizando...`);
+              break;
+            }
+            console.warn(`⚠️  Não foi possível navegar para página ${pageNum}, pulando...`);
+            continue;
+          }
+          
+          consecutiveFailures = 0; // Reset contador
+          
+          // Extrair dados desta página
+          const pageData = await this.extractTablePageData();
+          
+          // Verificar se há dados
+          if (pageData.rows.length === 0) {
+            console.log(`ℹ️  Nenhum dado encontrado na página ${pageNum}, pode ter chegado ao fim`);
+            break;
+          }
+          
+          // Verificar se estamos vendo dados duplicados
+          if (allRows.length > 0 && pageData.rows.length > 0) {
+            const lastRowFirstCell = allRows[allRows.length - 1].data[headers[0] || 'Nome do bem'];
+            const currentRowFirstCell = pageData.rows[0].data[headers[0] || 'Nome do bem'];
+            if (lastRowFirstCell === currentRowFirstCell) {
+              // Verificar múltiplas linhas para confirmar duplicação
+              let duplicateCount = 0;
+              const compareRows = Math.min(3, Math.min(allRows.length, pageData.rows.length));
+              for (let i = 0; i < compareRows; i++) {
+                const oldRow = allRows[allRows.length - compareRows + i];
+                const newRow = pageData.rows[i];
+                if (oldRow && newRow && oldRow.data[headers[0]] === newRow.data[headers[0]]) {
+                  duplicateCount++;
+                }
+              }
+              if (duplicateCount >= 2) {
+                console.log(`⚠️  Dados duplicados detectados na página ${pageNum}, finalizando...`);
+                break;
+              }
+            }
+          }
+          
+          // Ajustar números de linha para continuidade
+          const startRowNumber = allRows.length + 1;
+          pageData.rows.forEach((row, index) => {
+            row.rowNumber = startRowNumber + index;
+            allRows.push(row);
+          });
+          
+          lastExtractedPage = pageNum;
+          console.log(`✅ Página ${pageNum} extraída: ${pageData.rows.length} registros (Total acumulado: ${allRows.length})`);
+          
+          // Pequena pausa entre páginas
+          await this.page.waitForTimeout(1000);
+        }
+        
+        // Se ainda não extraímos todas as 19 páginas, continuar com Next button
+        if (lastExtractedPage < expectedPages) {
+          console.log(`⚠️  Apenas ${lastExtractedPage} páginas extraídas, continuando com botão Next até página ${expectedPages}...`);
+          while (lastExtractedPage < expectedPages) {
+            const isLast = await this.isLastPage();
+            if (isLast) {
+              console.log(`ℹ️  Chegamos na última página (${lastExtractedPage})`);
+              break;
+            }
+            
+            const nextSuccess = await this.navigateToNextPage();
+            if (!nextSuccess) {
+              console.log(`ℹ️  Não foi possível navegar para próxima página, finalizando em ${lastExtractedPage}`);
+              break;
+            }
+            
+            lastExtractedPage++;
+            console.log(`📄 Extraindo página ${lastExtractedPage}...`);
+            
+            const pageData = await this.extractTablePageData();
+            if (pageData.rows.length === 0) {
+              console.log(`ℹ️  Nenhum dado na página ${lastExtractedPage}, finalizando...`);
+              break;
+            }
+            
+            const startRowNumber = allRows.length + 1;
+            pageData.rows.forEach((row, index) => {
+              row.rowNumber = startRowNumber + index;
+              allRows.push(row);
+            });
+            
+            console.log(`✅ Página ${lastExtractedPage} extraída: ${pageData.rows.length} registros (Total acumulado: ${allRows.length})`);
+            await this.page.waitForTimeout(1000);
+          }
+        }
+        
+        totalPages = lastExtractedPage;
+      }
+      
+      console.log(`\n✅ Extração completa! Total de registros: ${allRows.length}`);
       
       // Criar diretório para dados se não existir
       const dataDir = path.join(process.cwd(), 'data');
@@ -970,17 +1807,13 @@ class CanopusRPAService {
         fs.mkdirSync(dataDir, { recursive: true });
       }
       
-      // Salvar dados em JSON
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const jsonFilename = `table-data-automoveis-${timestamp}.json`;
-      const jsonFilepath = path.join(dataDir, jsonFilename);
-      
       // Preparar dados para salvar (remover campos auxiliares _col_*)
       const cleanTableData = {
         extractedAt: new Date().toISOString(),
-        headers: tableData.headers,
-        totalRows: tableData.totalRows,
-        rows: tableData.rows.map(row => {
+        totalPages: totalPages,
+        headers: headers,
+        totalRows: allRows.length,
+        rows: allRows.map(row => {
           const cleanRow = { ...row.data };
           // Remover campos auxiliares
           Object.keys(cleanRow).forEach(key => {
@@ -992,22 +1825,27 @@ class CanopusRPAService {
         })
       };
       
+      // Salvar dados em JSON
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const jsonFilename = `table-data-automoveis-all-pages-${timestamp}.json`;
+      const jsonFilepath = path.join(dataDir, jsonFilename);
+      
       fs.writeFileSync(jsonFilepath, JSON.stringify(cleanTableData, null, 2), 'utf-8');
       console.log(`💾 Dados salvos em JSON: ${jsonFilename}`);
       
       // Salvar também em formato CSV para fácil importação
-      const csvFilename = `table-data-automoveis-${timestamp}.csv`;
+      const csvFilename = `table-data-automoveis-all-pages-${timestamp}.csv`;
       const csvFilepath = path.join(dataDir, csvFilename);
       
       let csvContent = '';
       // Cabeçalho CSV
-      if (tableData.headers.length > 0) {
-        csvContent += tableData.headers.map(h => `"${h}"`).join(',') + '\n';
+      if (headers.length > 0) {
+        csvContent += headers.map(h => `"${h}"`).join(',') + '\n';
       }
       
       // Dados CSV
-      tableData.rows.forEach((row) => {
-        const csvRow = tableData.headers.map((header, index) => {
+      allRows.forEach((row) => {
+        const csvRow = headers.map((header, index) => {
           const value = row.data[header] || row.data[`_col_${index}`] || '';
           // Escapar aspas e quebras de linha no CSV
           return `"${value.replace(/"/g, '""')}"`;
@@ -1019,26 +1857,27 @@ class CanopusRPAService {
       console.log(`💾 Dados salvos em CSV: ${csvFilename}`);
       
       // Salvar também em formato texto legível
-      const txtFilename = `table-data-automoveis-${timestamp}.txt`;
+      const txtFilename = `table-data-automoveis-all-pages-${timestamp}.txt`;
       const txtFilepath = path.join(dataDir, txtFilename);
       
-      let textContent = '=== DADOS DA TABELA - AUTOMOVEIS ===\n\n';
+      let textContent = '=== DADOS DA TABELA - AUTOMOVEIS (TODAS AS PÁGINAS) ===\n\n';
       textContent += `Data/Hora de Extração: ${new Date().toLocaleString('pt-BR')}\n`;
-      textContent += `Total de Registros: ${tableData.totalRows}\n\n`;
+      textContent += `Total de Páginas: ${totalPages}\n`;
+      textContent += `Total de Registros: ${allRows.length}\n\n`;
       
-      if (tableData.headers.length > 0) {
+      if (headers.length > 0) {
         textContent += '=== COLUNAS ===\n';
-        tableData.headers.forEach((header, index) => {
+        headers.forEach((header, index) => {
           textContent += `  ${index + 1}. ${header}\n`;
         });
         textContent += '\n';
       }
       
-      if (tableData.rows.length > 0) {
+      if (allRows.length > 0) {
         textContent += '=== DADOS ESTRUTURADOS ===\n\n';
-        tableData.rows.forEach((row, index) => {
-          textContent += `--- Registro ${index + 1} ---\n`;
-          tableData.headers.forEach((header, headerIndex) => {
+        allRows.forEach((row, index) => {
+          textContent += `--- Registro ${index + 1} (Página ${Math.floor(index / (allRows.length / totalPages)) + 1}) ---\n`;
+          headers.forEach((header, headerIndex) => {
             const value = row.data[header] || row.data[`_col_${headerIndex}`] || '';
             textContent += `  ${header}: ${value}\n`;
           });
@@ -1051,9 +1890,10 @@ class CanopusRPAService {
       
       // Exibir resumo no console
       console.log(`\n📊 Resumo dos dados extraídos:`);
-      console.log(`   - Total de registros: ${tableData.totalRows}`);
-      console.log(`   - Total de colunas: ${tableData.headers.length}`);
-      console.log(`   - Colunas: ${tableData.headers.join(', ')}`);
+      console.log(`   - Total de páginas: ${totalPages}`);
+      console.log(`   - Total de registros: ${allRows.length}`);
+      console.log(`   - Total de colunas: ${headers.length}`);
+      console.log(`   - Colunas: ${headers.join(', ')}`);
       console.log(`   - Arquivos salvos em: ./data/`);
       console.log(`     • JSON: ${jsonFilename}`);
       console.log(`     • CSV: ${csvFilename}`);
