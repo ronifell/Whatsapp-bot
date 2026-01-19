@@ -31,13 +31,104 @@ class CanopusRPAService {
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       });
 
+      // Definir timeout padrão maior para operações (2 minutos)
+      this.context.setDefaultTimeout(120000);
+
       this.page = await this.context.newPage();
+      
+      // Definir timeout padrão também na página
+      this.page.setDefaultTimeout(120000);
       
       console.log('✅ Navegador iniciado');
       return true;
     } catch (error) {
       console.error('❌ Erro ao iniciar navegador:', error.message);
       throw error;
+    }
+  }
+
+  /**
+   * Navega para uma URL com estratégia de espera tolerante
+   * Tenta diferentes estratégias para evitar timeouts
+   */
+  async navigateTo(url, options = {}) {
+    const timeout = options.timeout || 120000; // Aumentado para 120 segundos
+    
+    try {
+      // Primeiro, tentar com 'load' (espera evento load do navegador)
+      await this.page.goto(url, { 
+        waitUntil: 'load',
+        timeout: timeout 
+      });
+      console.log(`✅ Navegação concluída: ${url}`);
+    } catch (error) {
+      // Se falhar, tentar com 'domcontentloaded' (mais rápido)
+      try {
+        console.log(`⚠️  Tentando navegação alternativa para: ${url}`);
+        await this.page.goto(url, { 
+          waitUntil: 'domcontentloaded',
+          timeout: timeout 
+        });
+        console.log(`✅ Navegação concluída (domcontentloaded): ${url}`);
+      } catch (error2) {
+        // Se ainda falhar, tentar sem waitUntil (navega e continua)
+        console.log(`⚠️  Navegação sem espera completa: ${url}`);
+        await this.page.goto(url, { 
+          timeout: timeout 
+        });
+        console.log(`✅ Navegação concluída (sem waitUntil): ${url}`);
+      }
+    }
+    
+    // Aguardar um pouco para garantir que elementos dinâmicos carregaram
+    await this.page.waitForTimeout(2000);
+  }
+
+  /**
+   * Preenche campo de formulário Angular Material de forma adequada
+   * Simula digitação real e dispara eventos necessários para Angular
+   */
+  async fillAngularField(element, value) {
+    try {
+      // Clicar no campo para focar
+      await element.click({ timeout: 5000 }); // Aumentado para 5 segundos
+      await this.page.waitForTimeout(300); // Aumentado para 300ms
+      
+      // Limpar campo (Ctrl+A + Delete)
+      await element.press('Control+a');
+      await this.page.waitForTimeout(150); // Aumentado para 150ms
+      await element.press('Delete');
+      await this.page.waitForTimeout(150); // Aumentado para 150ms
+      
+      // Digitar valor (simula digitação real, dispara eventos input)
+      await element.type(value, { delay: 50 });
+      await this.page.waitForTimeout(500); // Aumentado para 500ms
+      
+      // Disparar eventos adicionais que Angular Material pode precisar
+      await element.evaluate((el, val) => {
+        // Disparar evento input
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        // Disparar evento change
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        // Disparar evento blur (quando campo perde foco)
+        el.dispatchEvent(new Event('blur', { bubbles: true }));
+        // Disparar evento keyup (alguns formulários escutam isso)
+        el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+      }, value);
+      
+      await this.page.waitForTimeout(300); // Aumentado para 300ms
+      
+      return true;
+    } catch (error) {
+      console.warn(`⚠️  Erro ao preencher campo Angular: ${error.message}`);
+      // Fallback: tentar fill() normal
+      try {
+        await element.fill(value);
+        await this.page.waitForTimeout(300);
+        return true;
+      } catch (e) {
+        throw error;
+      }
     }
   }
 
@@ -57,14 +148,23 @@ class CanopusRPAService {
 
       // Verificar se há mensagens de erro na página
       const errorSelectors = [
+        // Angular Material e mensagens específicas do Canopus
+        'text=/usuário.*senha.*inválido/i',
+        'text=/usuário.*inválido/i',
+        'text=/senha.*incorreta/i',
+        'text=/credenciais.*inválidas/i',
+        'text=/invalid.*credentials/i',
+        // Seletores genéricos
         '.error',
         '.alert-danger',
         '.login-error',
         '[class*="error"]',
         '[class*="invalid"]',
-        'text=/usuário.*inválido/i',
-        'text=/senha.*incorreta/i',
-        'text=/credenciais.*inválidas/i'
+        '[class*="mat-error"]',
+        '.mat-error',
+        // Buscar por texto de erro comum
+        'text=/erro/i',
+        'text=/falhou/i'
       ];
 
       for (const selector of errorSelectors) {
@@ -78,6 +178,28 @@ class CanopusRPAService {
         } catch (e) {
           // Seletor não encontrado, continuar
         }
+      }
+      
+      // Verificar também no texto da página inteira
+      try {
+        const pageText = await this.page.textContent('body');
+        const credentialErrorPatterns = [
+          /usuário.*senha.*inválido/i,
+          /usuário.*inválido/i,
+          /senha.*incorreta/i,
+          /credenciais.*inválidas/i,
+          /invalid.*credentials/i
+        ];
+        
+        for (const pattern of credentialErrorPatterns) {
+          if (pattern.test(pageText)) {
+            const match = pageText.match(pattern);
+            console.error(`❌ Erro de login detectado no texto da página: ${match ? match[0] : 'credenciais inválidas'}`);
+            return false;
+          }
+        }
+      } catch (e) {
+        // Ignorar erro ao ler texto
       }
 
       // Verificar se há indicadores de login bem-sucedido
@@ -141,13 +263,8 @@ class CanopusRPAService {
         throw new Error('Credenciais não configuradas no .env (CANOPUS_USERNAME e CANOPUS_PASSWORD)');
       }
       
-      await this.page.goto(config.canopus.url, { 
-        waitUntil: 'networkidle',
-        timeout: 30000 
-      });
-
-      // Aguardar página carregar completamente
-      await this.page.waitForTimeout(2000);
+      // Navegar para a página de login usando método tolerante
+      await this.navigateTo(config.canopus.url);
 
       // Captura screenshot da página de login
       await this.screenshot('01-login-page');
@@ -155,114 +272,380 @@ class CanopusRPAService {
       // IMPORTANTE: Os seletores abaixo são EXEMPLOS
       // Você precisa ajustá-los de acordo com o site real da Canopus
       
-      // Procurar campo de usuário com múltiplas tentativas
+      // Aguardar um pouco mais para garantir que elementos dinâmicos carregaram
+      console.log('⏳ Aguardando elementos da página carregarem...');
+      await this.page.waitForTimeout(3000); // Aumentado para 3 segundos
+      
+      // Debug: Listar todos os inputs encontrados na página
+      console.log('🔍 Procurando campos de formulário...');
+      try {
+        const allInputs = await this.page.locator('input').all();
+        console.log(`   Encontrados ${allInputs.length} campos input na página`);
+        for (let i = 0; i < Math.min(allInputs.length, 5); i++) {
+          try {
+            const input = allInputs[i];
+            const type = await input.getAttribute('type') || 'text';
+            const name = await input.getAttribute('name') || '';
+            const id = await input.getAttribute('id') || '';
+            const placeholder = await input.getAttribute('placeholder') || '';
+            console.log(`   Input ${i + 1}: type="${type}", name="${name}", id="${id}", placeholder="${placeholder}"`);
+          } catch (e) {
+            // Ignorar erros ao ler atributos
+          }
+        }
+      } catch (e) {
+        console.log('   ⚠️  Não foi possível listar inputs');
+      }
+      
+      // Procurar campo de usuário com múltiplas tentativas e estratégias
       const usernameSelectors = [
+        // Seletores Angular Material (Canopus específico)
+        'input[formcontrolname="Usuario"]',
+        'input[formControlName="Usuario"]',
+        'input#mat-input-1',
+        'input.mat-input-element[formcontrolname="Usuario"]',
+        // Seletores específicos
         'input[name="username"]',
         'input[name="user"]',
         'input[name="email"]',
-        'input[type="text"]',
-        'input#username',
-        'input#user',
-        'input#email',
+        'input[name="login"]',
+        'input[name="usuario"]',
+        'input[id="username"]',
+        'input[id="user"]',
+        'input[id="email"]',
+        'input[id="login"]',
+        'input[id="usuario"]',
+        // Seletores por placeholder (case insensitive)
         'input[placeholder*="usuário" i]',
+        'input[placeholder*="usuario" i]',
         'input[placeholder*="email" i]',
-        'input[placeholder*="login" i]'
+        'input[placeholder*="login" i]',
+        'input[placeholder*="user" i]',
+        // Seletores por label associado
+        'label:has-text("usuário") + input, label:has-text("usuario") + input',
+        'label:has-text("email") + input',
+        'label:has-text("login") + input',
+        'label:has-text("user") + input',
+        // Buscar por label e depois o input relacionado
+        'input[aria-label*="usuário" i], input[aria-label*="usuario" i]',
+        'input[aria-label*="email" i]',
+        'input[aria-label*="login" i]',
+        // Seletores genéricos (última tentativa)
+        'input[type="text"]:not(input[type="password"])',
+        'form input[type="text"]:first-of-type',
+        'input:not([type="password"]):not([type="submit"]):not([type="button"]):not([type="hidden"])'
       ];
 
       let usernameFilled = false;
+      let lastError = null;
+      
       for (const selector of usernameSelectors) {
         try {
-          const element = await this.page.locator(selector).first();
-          if (await element.isVisible({ timeout: 2000 })) {
-            await element.fill(config.canopus.username);
-            console.log(`✅ Usuário preenchido (seletor: ${selector})`);
-            usernameFilled = true;
-            break;
+          const elements = await this.page.locator(selector).all();
+          if (elements.length > 0) {
+            // Tentar o primeiro elemento visível
+            for (const element of elements) {
+              try {
+                if (await element.isVisible({ timeout: 1000 })) {
+                  // Verificar se não é campo de senha
+                  const type = await element.getAttribute('type');
+                  if (type === 'password') continue;
+                  
+                  await this.fillAngularField(element, config.canopus.username);
+                  console.log(`✅ Usuário preenchido (seletor: ${selector})`);
+                  usernameFilled = true;
+                  break;
+                }
+              } catch (e) {
+                // Tentar próximo elemento
+              }
+            }
+            if (usernameFilled) break;
           }
         } catch (e) {
+          lastError = e;
           // Tentar próximo seletor
+        }
+      }
+
+      // Se ainda não encontrou, tentar estratégia mais agressiva: pegar primeiro input text visível
+      if (!usernameFilled) {
+        console.log('⚠️  Tentando estratégia alternativa: primeiro input text visível...');
+        try {
+          const allTextInputs = await this.page.locator('input[type="text"], input:not([type])').all();
+          for (const input of allTextInputs) {
+            try {
+              if (await input.isVisible({ timeout: 1000 })) {
+                const type = await input.getAttribute('type');
+                if (type === 'password' || type === 'hidden' || type === 'submit' || type === 'button') continue;
+                
+                await this.fillAngularField(input, config.canopus.username);
+                console.log('✅ Usuário preenchido (primeiro input text visível)');
+                usernameFilled = true;
+                break;
+              }
+            } catch (e) {
+              // Continuar
+            }
+          }
+        } catch (e) {
+          // Ignorar
         }
       }
 
       if (!usernameFilled) {
-        throw new Error('Não foi possível encontrar o campo de usuário. Verifique os seletores no código.');
+        console.error('❌ Não foi possível encontrar o campo de usuário.');
+        console.error('💡 Dicas:');
+        console.error('   1. Verifique o screenshot em ./screenshots/01-login-page-*.png');
+        console.error('   2. Inspecione a página no navegador para encontrar o seletor correto');
+        console.error('   3. Adicione o seletor correto em src/services/canopus-rpa.service.js');
+        throw new Error('Não foi possível encontrar o campo de usuário. Verifique os seletores no código e o screenshot.');
       }
 
       // Procurar campo de senha
       const passwordSelectors = [
+        // Seletores Angular Material (Canopus específico)
+        'input[type="password"][formcontrolname="Senha"]',
+        'input[type="password"][formControlName="Senha"]',
+        'input#mat-input-2',
+        'input[formcontrolname="Senha"]',
+        'input.mat-input-element[type="password"][formcontrolname="Senha"]',
+        // Seletores específicos
         'input[name="password"]',
         'input[name="senha"]',
         'input[type="password"]',
-        'input#password',
-        'input#senha',
+        'input[id="password"]',
+        'input[id="senha"]',
+        // Seletores por placeholder
         'input[placeholder*="senha" i]',
-        'input[placeholder*="password" i]'
+        'input[placeholder*="password" i]',
+        // Seletores por label associado
+        'label:has-text("senha") + input, label:has-text("password") + input',
+        // Buscar por aria-label
+        'input[aria-label*="senha" i], input[aria-label*="password" i]',
+        // Seletor genérico (última tentativa)
+        'input[type="password"]'
       ];
 
       let passwordFilled = false;
+      
       for (const selector of passwordSelectors) {
         try {
-          const element = await this.page.locator(selector).first();
-          if (await element.isVisible({ timeout: 2000 })) {
-            await element.fill(config.canopus.password);
-            console.log(`✅ Senha preenchida (seletor: ${selector})`);
-            passwordFilled = true;
-            break;
+          const elements = await this.page.locator(selector).all();
+          if (elements.length > 0) {
+            // Tentar o primeiro elemento visível
+            for (const element of elements) {
+              try {
+                if (await element.isVisible({ timeout: 1000 })) {
+                  await this.fillAngularField(element, config.canopus.password);
+                  console.log(`✅ Senha preenchida (seletor: ${selector})`);
+                  passwordFilled = true;
+                  break;
+                }
+              } catch (e) {
+                // Tentar próximo elemento
+              }
+            }
+            if (passwordFilled) break;
           }
         } catch (e) {
           // Tentar próximo seletor
+        }
+      }
+
+      // Se ainda não encontrou, tentar pegar primeiro input password visível
+      if (!passwordFilled) {
+        console.log('⚠️  Tentando estratégia alternativa: primeiro input password visível...');
+        try {
+          const allPasswordInputs = await this.page.locator('input[type="password"]').all();
+          for (const input of allPasswordInputs) {
+            try {
+              if (await input.isVisible({ timeout: 1000 })) {
+                await this.fillAngularField(input, config.canopus.password);
+                console.log('✅ Senha preenchida (primeiro input password visível)');
+                passwordFilled = true;
+                break;
+              }
+            } catch (e) {
+              // Continuar
+            }
+          }
+        } catch (e) {
+          // Ignorar
         }
       }
 
       if (!passwordFilled) {
-        throw new Error('Não foi possível encontrar o campo de senha. Verifique os seletores no código.');
+        console.error('❌ Não foi possível encontrar o campo de senha.');
+        console.error('💡 Dicas:');
+        console.error('   1. Verifique o screenshot em ./screenshots/02-credentials-filled-*.png');
+        console.error('   2. Inspecione a página no navegador para encontrar o seletor correto');
+        console.error('   3. Adicione o seletor correto em src/services/canopus-rpa.service.js');
+        throw new Error('Não foi possível encontrar o campo de senha. Verifique os seletores no código e o screenshot.');
       }
 
       await this.screenshot('02-credentials-filled');
 
+      // Aguardar um pouco para Angular processar as mudanças e validar o formulário
+      console.log('⏳ Aguardando validação do formulário Angular...');
+      await this.page.waitForTimeout(3000); // Aumentado para 3 segundos
+
       // Procurar botão de login
       const loginButtonSelectors = [
+        // Seletores Angular Material (Canopus específico)
+        'button[aria-label="LOG IN"]',
+        'button.submit-button',
+        'button.mat-raised-button[color="accent"]',
+        'button:has-text("ACESSAR")',
+        'button:has-text("Acessar")',
+        'button:has-text("acessar")',
+        'button.mat-button-base.submit-button',
+        // Seletores específicos por tipo
         'button[type="submit"]',
         'input[type="submit"]',
+        // Seletores por texto (case insensitive)
         'button:has-text("Entrar")',
+        'button:has-text("entrar")',
         'button:has-text("Login")',
-        'button:has-text("Acessar")',
+        'button:has-text("login")',
+        'button:has-text("Sign in")',
+        'button:has-text("sign in")',
+        // Seletores por classe
         'button.btn-login',
         'button.btn-primary',
-        'form button',
+        'button.btn-submit',
         'button[class*="login"]',
-        'button[class*="submit"]'
+        'button[class*="submit"]',
+        'button[class*="entrar"]',
+        // Seletores genéricos
+        'form button[type="submit"]',
+        'form button:not([type="button"])',
+        'form button:last-of-type',
+        // Buscar dentro do form
+        'form input[type="submit"]',
+        'form button'
       ];
 
       let buttonClicked = false;
+      
       for (const selector of loginButtonSelectors) {
         try {
-          const element = await this.page.locator(selector).first();
-          if (await element.isVisible({ timeout: 2000 })) {
-            await element.click();
-            console.log(`🔘 Botão de login clicado (seletor: ${selector})`);
-            buttonClicked = true;
-            break;
+          const elements = await this.page.locator(selector).all();
+          if (elements.length > 0) {
+            // Tentar o primeiro elemento visível e clicável
+            for (const element of elements) {
+              try {
+                if (await element.isVisible({ timeout: 1000 })) {
+                  await element.click();
+                  console.log(`🔘 Botão de login clicado (seletor: ${selector})`);
+                  buttonClicked = true;
+                  break;
+                }
+              } catch (e) {
+                // Tentar próximo elemento
+              }
+            }
+            if (buttonClicked) break;
           }
         } catch (e) {
           // Tentar próximo seletor
         }
       }
 
+      // Se ainda não encontrou, tentar estratégias alternativas
       if (!buttonClicked) {
-        // Tentar pressionar Enter no campo de senha
+        console.log('⚠️  Tentando estratégias alternativas para o botão de login...');
+        
+        // Estratégia 1: Pressionar Enter no campo de senha
         try {
-          await this.page.keyboard.press('Enter');
-          console.log('🔘 Enter pressionado no campo de senha');
-          buttonClicked = true;
+          const passwordField = await this.page.locator('input[type="password"]').first();
+          if (await passwordField.isVisible({ timeout: 1000 })) {
+            await passwordField.press('Enter');
+            console.log('🔘 Enter pressionado no campo de senha');
+            buttonClicked = true;
+          }
         } catch (e) {
-          throw new Error('Não foi possível encontrar o botão de login. Verifique os seletores no código.');
+          // Tentar próxima estratégia
+        }
+        
+        // Estratégia 2: Buscar qualquer botão no form
+        if (!buttonClicked) {
+          try {
+            const formButtons = await this.page.locator('form button, form input[type="submit"]').all();
+            for (const btn of formButtons) {
+              try {
+                if (await btn.isVisible({ timeout: 1000 })) {
+                  await btn.click();
+                  console.log('🔘 Botão clicado (qualquer botão do form)');
+                  buttonClicked = true;
+                  break;
+                }
+              } catch (e) {
+                // Continuar
+              }
+            }
+          } catch (e) {
+            // Ignorar
+          }
+        }
+        
+        // Estratégia 3: Submeter formulário diretamente (para Angular forms)
+        if (!buttonClicked) {
+          try {
+            const form = await this.page.locator('form').first();
+            if (await form.isVisible({ timeout: 1000 })) {
+              await form.evaluate((formEl) => {
+                // Disparar evento submit no formulário
+                formEl.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+              });
+              console.log('🔘 Formulário submetido diretamente');
+              buttonClicked = true;
+            }
+          } catch (e) {
+            // Ignorar
+          }
         }
       }
 
+      if (!buttonClicked) {
+        console.error('❌ Não foi possível encontrar o botão de login.');
+        console.error('💡 Dicas:');
+        console.error('   1. Verifique o screenshot em ./screenshots/02-credentials-filled-*.png');
+        console.error('   2. Inspecione a página no navegador para encontrar o seletor correto');
+        console.error('   3. Adicione o seletor correto em src/services/canopus-rpa.service.js');
+        throw new Error('Não foi possível encontrar o botão de login. Verifique os seletores no código e o screenshot.');
+      }
+
       // Aguardar navegação após login
-      await this.page.waitForLoadState('networkidle', { timeout: 15000 });
-      await this.page.waitForTimeout(3000); // Aguardar um pouco mais para garantir
+      console.log('⏳ Aguardando resposta do servidor após login...');
+      const initialUrl = this.page.url();
+      try {
+        // Aguardar por mudança de URL (indicando redirecionamento após login)
+        try {
+          await this.page.waitForFunction(
+            (url) => window.location.href !== url,
+            initialUrl,
+            { timeout: 30000 } // Aumentado para 30 segundos
+          );
+          console.log('✅ URL mudou após login');
+        } catch (e) {
+          // URL não mudou, continuar
+          console.log('ℹ️  URL não mudou, continuando...');
+        }
+        
+        // Aguardar carregamento da página
+        try {
+          await this.page.waitForLoadState('load', { timeout: 30000 }); // Aumentado para 30 segundos
+          console.log('✅ Página carregada completamente');
+        } catch (e) {
+          console.log('⚠️  Aguardando carregamento básico...');
+          await this.page.waitForLoadState('domcontentloaded', { timeout: 15000 }); // Aumentado para 15 segundos
+        }
+      } catch (error) {
+        // Continuar mesmo se não conseguir esperar
+        console.log('⚠️  Continuando sem esperar load state completo');
+      }
+      await this.page.waitForTimeout(5000); // Aumentado para 5 segundos para garantir
 
       await this.screenshot('03-after-login');
 
@@ -270,18 +653,35 @@ class CanopusRPAService {
       const loginSuccessful = await this.verifyLoginSuccess();
       
       if (!loginSuccessful) {
-        // Verificar se há mensagens de erro visíveis
+        // Verificar se há mensagens de erro visíveis relacionadas a credenciais
         const pageText = await this.page.textContent('body');
-        const errorKeywords = ['erro', 'inválido', 'incorreto', 'falhou', 'error', 'invalid', 'incorrect'];
-        const hasError = errorKeywords.some(keyword => 
-          pageText.toLowerCase().includes(keyword)
-        );
+        const credentialErrorKeywords = ['usuário.*inválido', 'senha.*incorreta', 'credenciais.*inválidas', 'invalid.*credentials'];
+        const hasCredentialError = credentialErrorKeywords.some(keyword => {
+          const regex = new RegExp(keyword, 'i');
+          return regex.test(pageText);
+        });
 
-        if (hasError) {
-          throw new Error('Login falhou. Verifique as credenciais no arquivo .env e os seletores no código.');
+        if (hasCredentialError) {
+          console.error('\n❌ ERRO DE CREDENCIAIS DETECTADO');
+          console.error('   A automação está funcionando corretamente, mas as credenciais estão incorretas.');
+          console.error('   Verifique no arquivo .env:');
+          console.error(`   - CANOPUS_USERNAME=${config.canopus.username}`);
+          console.error(`   - CANOPUS_PASSWORD=${'*'.repeat(config.canopus.password.length)}`);
+          console.error('\n💡 Dica: Verifique se o usuário e senha estão corretos no arquivo .env\n');
+          throw new Error('Login falhou: Credenciais inválidas. Verifique CANOPUS_USERNAME e CANOPUS_PASSWORD no arquivo .env');
         } else {
-          // Se não encontrou erro explícito, mas também não confirmou sucesso, assumir falha
-          throw new Error('Não foi possível confirmar se o login foi bem-sucedido. Verifique os screenshots em ./screenshots/');
+          // Verificar outros tipos de erro
+          const errorKeywords = ['erro', 'inválido', 'incorreto', 'falhou', 'error', 'invalid', 'incorrect'];
+          const hasError = errorKeywords.some(keyword => 
+            pageText.toLowerCase().includes(keyword)
+          );
+
+          if (hasError) {
+            throw new Error('Login falhou. Verifique os screenshots em ./screenshots/ para ver o erro específico.');
+          } else {
+            // Se não encontrou erro explícito, mas também não confirmou sucesso, assumir falha
+            throw new Error('Não foi possível confirmar se o login foi bem-sucedido. Verifique os screenshots em ./screenshots/');
+          }
         }
       }
 
@@ -311,12 +711,7 @@ class CanopusRPAService {
 
       // Navegar para página de cotação de automóvel
       // IMPORTANTE: Ajustar URL e seletores conforme o site real
-      await this.page.goto(`${config.canopus.url}/cotacao/automovel`, {
-        waitUntil: 'networkidle',
-        timeout: 30000
-      });
-
-      await this.page.waitForTimeout(2000);
+      await this.navigateTo(`${config.canopus.url}/cotacao/automovel`);
       await this.screenshot('04-car-quotation-page');
 
       // Preencher valor do veículo
@@ -346,7 +741,17 @@ class CanopusRPAService {
       console.log('🔘 Botão de gerar cotação clicado');
 
       // Aguardar resultado
-      await this.page.waitForLoadState('networkidle', { timeout: 20000 });
+      try {
+        await this.page.waitForLoadState('load', { timeout: 20000 });
+      } catch (error) {
+        // Se falhar, tentar domcontentloaded ou apenas aguardar
+        try {
+          await this.page.waitForLoadState('domcontentloaded', { timeout: 15000 });
+        } catch (e) {
+          // Continuar mesmo se não conseguir esperar
+          console.log('⚠️  Continuando sem esperar load state completo');
+        }
+      }
       await this.page.waitForTimeout(3000);
 
       await this.screenshot('06-quotation-result');
@@ -377,12 +782,7 @@ class CanopusRPAService {
 
       // Navegar para página de cotação de imóvel
       // IMPORTANTE: Ajustar URL e seletores conforme o site real
-      await this.page.goto(`${config.canopus.url}/cotacao/imovel`, {
-        waitUntil: 'networkidle',
-        timeout: 30000
-      });
-
-      await this.page.waitForTimeout(2000);
+      await this.navigateTo(`${config.canopus.url}/cotacao/imovel`);
       await this.screenshot('07-property-quotation-page');
 
       // Preencher valor do imóvel
@@ -412,7 +812,17 @@ class CanopusRPAService {
       console.log('🔘 Botão de gerar cotação clicado');
 
       // Aguardar resultado
-      await this.page.waitForLoadState('networkidle', { timeout: 20000 });
+      try {
+        await this.page.waitForLoadState('load', { timeout: 20000 });
+      } catch (error) {
+        // Se falhar, tentar domcontentloaded ou apenas aguardar
+        try {
+          await this.page.waitForLoadState('domcontentloaded', { timeout: 15000 });
+        } catch (e) {
+          // Continuar mesmo se não conseguir esperar
+          console.log('⚠️  Continuando sem esperar load state completo');
+        }
+      }
       await this.page.waitForTimeout(3000);
 
       await this.screenshot('09-quotation-result');

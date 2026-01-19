@@ -62,9 +62,9 @@ async function testLogin() {
     }
 
     // Manter navegador aberto por alguns segundos para inspeção
-    console.log('⏳ Mantendo navegador aberto por 10 segundos para inspeção...');
+    console.log('⏳ Mantendo navegador aberto por 15 segundos para inspeção...');
     console.log('   (Você pode verificar manualmente se está logado)\n');
-    await new Promise(resolve => setTimeout(resolve, 10000));
+    await new Promise(resolve => setTimeout(resolve, 15000)); // Aumentado para 15 segundos
 
     // Fechar navegador
     console.log('🔒 Fechando navegador...');
