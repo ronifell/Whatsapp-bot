@@ -13,10 +13,26 @@ class WhatsAppService {
   }
 
   /**
+   * Verifica se está em modo de teste
+   */
+  isTestMode() {
+    return process.env.TEST_MODE === 'true' || process.env.NODE_ENV === 'test';
+  }
+
+  /**
    * Envia uma mensagem de texto para um número
    */
   async sendMessage(phone, message) {
     try {
+      // Modo de teste: apenas logar, não enviar realmente
+      if (this.isTestMode()) {
+        console.log('\n📱 [MODO TESTE] Mensagem que seria enviada:');
+        console.log(`   Para: ${phone}`);
+        console.log(`   Mensagem:\n${message}\n`);
+        console.log('─'.repeat(60));
+        return { success: true, testMode: true };
+      }
+
       const response = await axios.post(`${this.apiUrl}/send-text`, {
         phone: phone,
         message: message
@@ -35,6 +51,15 @@ class WhatsAppService {
    */
   async sendMessageWithLink(phone, message) {
     try {
+      // Modo de teste: apenas logar, não enviar realmente
+      if (this.isTestMode()) {
+        console.log('\n📱 [MODO TESTE] Mensagem com link que seria enviada:');
+        console.log(`   Para: ${phone}`);
+        console.log(`   Mensagem:\n${message}\n`);
+        console.log('─'.repeat(60));
+        return { success: true, testMode: true };
+      }
+
       const response = await axios.post(`${this.apiUrl}/send-text`, {
         phone: phone,
         message: message
@@ -53,6 +78,16 @@ class WhatsAppService {
    */
   async sendDocument(phone, documentUrl, fileName) {
     try {
+      // Modo de teste: apenas logar, não enviar realmente
+      if (this.isTestMode()) {
+        console.log('\n📱 [MODO TESTE] Documento que seria enviado:');
+        console.log(`   Para: ${phone}`);
+        console.log(`   Arquivo: ${fileName}`);
+        console.log(`   URL: ${documentUrl}\n`);
+        console.log('─'.repeat(60));
+        return { success: true, testMode: true };
+      }
+
       const response = await axios.post(`${this.apiUrl}/send-document`, {
         phone: phone,
         document: documentUrl,
@@ -72,6 +107,16 @@ class WhatsAppService {
    */
   async sendImage(phone, imageUrl, caption = '') {
     try {
+      // Modo de teste: apenas logar, não enviar realmente
+      if (this.isTestMode()) {
+        console.log('\n📱 [MODO TESTE] Imagem que seria enviada:');
+        console.log(`   Para: ${phone}`);
+        console.log(`   URL: ${imageUrl}`);
+        console.log(`   Legenda: ${caption}\n`);
+        console.log('─'.repeat(60));
+        return { success: true, testMode: true };
+      }
+
       const response = await axios.post(`${this.apiUrl}/send-image`, {
         phone: phone,
         image: imageUrl,
@@ -91,6 +136,14 @@ class WhatsAppService {
    */
   async setWebhook(webhookUrl) {
     try {
+      // Modo de teste: apenas logar, não configurar realmente
+      if (this.isTestMode()) {
+        console.log('\n📱 [MODO TESTE] Webhook que seria configurado:');
+        console.log(`   URL: ${webhookUrl}\n`);
+        console.log('─'.repeat(60));
+        return { success: true, testMode: true };
+      }
+
       const response = await axios.post(`${this.apiUrl}/update-webhook`, {
         webhook: webhookUrl
       });

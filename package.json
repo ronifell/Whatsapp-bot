@@ -9,6 +9,8 @@
     "dev": "node --watch src/index.js",
     "test:rpa": "node src/test-rpa.js",
     "test:login": "node src/test-login.js",
+    "test:flow": "node src/test-full-flow.js",
+    "test:flow:step": "node src/test-full-flow.js step",
     "install:browsers": "npx playwright install chromium"
   },
   "keywords": [

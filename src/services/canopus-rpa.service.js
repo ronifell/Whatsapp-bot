@@ -1908,65 +1908,190 @@ class CanopusRPAService {
   }
 
   /**
-   * Gera cotação de consórcio de automóvel
+   * Encontra o melhor plano baseado nos dados do cliente
+   */
+  findBestMatchingPlan(scrapedData, customerValue, customerTerm) {
+    try {
+      if (!scrapedData || !scrapedData.rows || scrapedData.rows.length === 0) {
+        return null;
+      }
+
+      // Converter valor do cliente para número (remover formatação)
+      const cleanCustomerValue = parseFloat(
+        customerValue.toString().replace(/[^\d,]/g, '').replace(',', '.')
+      );
+
+      // Procurar planos que correspondam ao valor e prazo do cliente
+      let bestMatch = null;
+      let smallestDifference = Infinity;
+
+      for (const row of scrapedData.rows) {
+        try {
+          // Extrair valor do plano
+          const planValueText = row['Valor'] || row['valor'] || '';
+          const planValue = parseFloat(
+            planValueText.replace(/[^\d,]/g, '').replace(',', '.')
+          );
+
+          // Extrair prazo do plano
+          const planTermText = row['Prazo'] || row['prazo'] || '';
+          const planTerm = parseInt(planTermText.replace(/\D/g, ''));
+
+          // Extrair primeira parcela
+          const firstPaymentText = row['1ª parcela'] || row['primeira_parcela'] || '';
+          const firstPayment = parseFloat(
+            firstPaymentText.replace(/[^\d,]/g, '').replace(',', '.')
+          );
+
+          // Verificar se o prazo corresponde (com tolerância)
+          const termDifference = Math.abs(planTerm - customerTerm);
+          
+          // Se o prazo está próximo (diferença de até 10 meses) e o valor está próximo
+          if (termDifference <= 10) {
+            const valueDifference = Math.abs(planValue - cleanCustomerValue);
+            const totalDifference = valueDifference + (termDifference * 1000); // Peso para prazo
+
+            if (totalDifference < smallestDifference) {
+              smallestDifference = totalDifference;
+              bestMatch = {
+                nomeBem: row['Nome do bem'] || row['nome_bem'] || '',
+                valor: planValue,
+                prazo: planTerm,
+                primeiraParcela: firstPayment,
+                plano: row['Plano'] || row['plano'] || '',
+                tipoVenda: row['Tipo de Venda'] || row['tipo_venda'] || '',
+                rawData: row
+              };
+            }
+          }
+        } catch (e) {
+          // Continuar se houver erro ao processar uma linha
+          continue;
+        }
+      }
+
+      return bestMatch;
+    } catch (error) {
+      console.error('❌ Erro ao encontrar melhor plano:', error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Gera cotação de consórcio de automóvel usando dados extraídos da tabela
    */
   async generateCarQuotation(data) {
     try {
       console.log('🚗 Gerando cotação de automóvel...');
+      console.log(`   Cliente: ${data.nome}`);
+      console.log(`   Valor desejado: R$ ${data.valor.toLocaleString('pt-BR')}`);
+      console.log(`   Prazo desejado: ${data.prazo} meses`);
       
       if (!this.isLoggedIn) {
         await this.login();
       }
 
-      // Navegar para página de cotação de automóvel
-      // IMPORTANTE: Ajustar URL e seletores conforme o site real
-      await this.navigateTo(`${config.canopus.url}/cotacao/automovel`);
-      await this.screenshot('04-car-quotation-page');
+      // Navegar para página de planos, selecionar AUTOMOVEIS e IPCA, e extrair dados
+      console.log('📋 Acessando lista de planos...');
+      await this.navigateToPlansList();
 
-      // Preencher valor do veículo
-      const valueSelector = 'input[name="valor"], input#valor, input[placeholder*="valor"]';
-      await this.page.waitForSelector(valueSelector, { timeout: 10000 });
-      await this.page.fill(valueSelector, data.valor.toString());
-      console.log(`✅ Valor preenchido: R$ ${data.valor}`);
+      // Aguardar um pouco para garantir que o arquivo foi salvo
+      await this.page.waitForTimeout(2000);
 
-      // Selecionar prazo
-      const prazoSelector = 'select[name="prazo"], select#prazo';
-      await this.page.selectOption(prazoSelector, data.prazo.toString());
-      console.log(`✅ Prazo selecionado: ${data.prazo} meses`);
-
-      // Preencher dados pessoais
-      await this.page.fill('input[name="nome"], input#nome', data.nome);
-      await this.page.fill('input[name="cpf"], input#cpf', data.cpf);
-      await this.page.fill('input[name="dataNascimento"], input#dataNascimento', data.dataNascimento);
-      await this.page.fill('input[name="email"], input#email', data.email);
+      // Carregar dados extraídos mais recentes
+      const dataDir = path.join(process.cwd(), 'data');
       
-      console.log('✅ Dados pessoais preenchidos');
+      // Verificar se o diretório existe
+      if (!fs.existsSync(dataDir)) {
+        throw new Error('Diretório de dados não encontrado. A extração pode ter falhado.');
+      }
 
-      await this.screenshot('05-form-filled');
+      const files = fs.readdirSync(dataDir)
+        .filter(f => f.startsWith('table-data-automoveis-all-pages-') && f.endsWith('.json'))
+        .sort()
+        .reverse(); // Mais recente primeiro
 
-      // Clicar em gerar cotação
-      const generateButtonSelector = 'button:has-text("Gerar"), button:has-text("Cotar"), button[type="submit"]';
-      await this.page.click(generateButtonSelector);
-      console.log('🔘 Botão de gerar cotação clicado');
+      if (files.length === 0) {
+        throw new Error('Nenhum arquivo de dados extraídos encontrado. A extração pode ter falhado.');
+      }
 
-      // Aguardar resultado
-      try {
-        await this.page.waitForLoadState('load', { timeout: 20000 });
-      } catch (error) {
-        // Se falhar, tentar domcontentloaded ou apenas aguardar
+      const latestFile = path.join(dataDir, files[0]);
+      console.log(`📂 Carregando dados de: ${files[0]}`);
+      
+      // Tentar ler o arquivo (pode precisar de algumas tentativas se ainda estiver sendo escrito)
+      let scrapedData = null;
+      let attempts = 0;
+      const maxAttempts = 5;
+      
+      while (attempts < maxAttempts) {
         try {
-          await this.page.waitForLoadState('domcontentloaded', { timeout: 15000 });
+          const fileContent = fs.readFileSync(latestFile, 'utf-8');
+          scrapedData = JSON.parse(fileContent);
+          break;
         } catch (e) {
-          // Continuar mesmo se não conseguir esperar
-          console.log('⚠️  Continuando sem esperar load state completo');
+          attempts++;
+          if (attempts >= maxAttempts) {
+            throw new Error(`Não foi possível ler o arquivo de dados após ${maxAttempts} tentativas: ${e.message}`);
+          }
+          console.log(`⏳ Aguardando arquivo ser salvo (tentativa ${attempts}/${maxAttempts})...`);
+          await this.page.waitForTimeout(2000);
         }
       }
-      await this.page.waitForTimeout(3000);
 
-      await this.screenshot('06-quotation-result');
+      // Encontrar melhor plano correspondente
+      console.log('🔍 Procurando melhor plano correspondente...');
+      const bestPlan = this.findBestMatchingPlan(scrapedData, data.valor, data.prazo);
 
-      // Extrair dados da cotação
-      const quotationData = await this.extractQuotationData('CARRO', data.valor, data.prazo);
+      if (!bestPlan) {
+        // Se não encontrou plano exato, usar estimativa
+        console.log('⚠️  Plano exato não encontrado, usando estimativa...');
+        return {
+          type: 'Consórcio de Automóvel',
+          value: data.valor,
+          months: data.prazo,
+          monthlyPayment: this.calculateEstimatedPayment(data.valor, data.prazo),
+          adminFee: 15,
+          details: 'Cotação baseada em estimativa. Entre em contato para valores exatos.',
+          timestamp: new Date().toISOString(),
+          customerData: {
+            nome: data.nome,
+            cpf: data.cpf,
+            email: data.email
+          }
+        };
+      }
+
+      console.log('✅ Plano encontrado:');
+      console.log(`   Nome: ${bestPlan.nomeBem}`);
+      console.log(`   Valor: R$ ${bestPlan.valor.toLocaleString('pt-BR')}`);
+      console.log(`   Prazo: ${bestPlan.prazo} meses`);
+      console.log(`   1ª Parcela: R$ ${bestPlan.primeiraParcela.toLocaleString('pt-BR')}`);
+
+      // Calcular parcela mensal estimada (se não disponível)
+      const monthlyPayment = bestPlan.primeiraParcela || 
+        this.calculateEstimatedPayment(bestPlan.valor, bestPlan.prazo);
+
+      // Preparar dados da cotação
+      const quotationData = {
+        type: 'Consórcio de Automóvel',
+        value: bestPlan.valor,
+        months: bestPlan.prazo,
+        monthlyPayment: monthlyPayment,
+        adminFee: 15, // Taxa padrão
+        details: `Plano: ${bestPlan.plano}\nTipo de Venda: ${bestPlan.tipoVenda}\nNome do Bem: ${bestPlan.nomeBem}`,
+        timestamp: new Date().toISOString(),
+        customerData: {
+          nome: data.nome,
+          cpf: data.cpf,
+          email: data.email,
+          dataNascimento: data.dataNascimento
+        },
+        planDetails: {
+          nomeBem: bestPlan.nomeBem,
+          plano: bestPlan.plano,
+          tipoVenda: bestPlan.tipoVenda
+        }
+      };
       
       console.log('✅ Cotação de automóvel gerada com sucesso!');
       return quotationData;

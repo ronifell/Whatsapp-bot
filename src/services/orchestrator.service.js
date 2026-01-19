@@ -46,6 +46,14 @@ class OrchestratorService {
           await this.handleDataCollection(phone, message, session);
           break;
 
+        case 'PROCESSING':
+          // Cliente enviou mensagem durante processamento
+          await whatsappService.sendMessage(
+            phone,
+            '⏳ Sua cotação está sendo processada. Por favor, aguarde...'
+          );
+          break;
+
         case 'COMPLETED':
           await this.handlePostQuotation(phone, message, session);
           break;
@@ -68,11 +76,67 @@ class OrchestratorService {
   }
 
   /**
-   * Trata estado inicial - envia boas-vindas
+   * Trata estado inicial - tenta processar mensagem completa ou envia boas-vindas
    */
   async handleInitialState(phone, message, session) {
-    await whatsappService.sendWelcomeMessage(phone);
-    sessionService.updateSession(phone, { state: 'AWAITING_TYPE' });
+    // Tentar processar mensagem completa (pode conter tipo + dados)
+    try {
+      // 1. Tentar classificar o tipo de consórcio
+      const classification = await aiService.classifyConsortiumType(message);
+      
+      if (classification && classification !== 'OUTROS') {
+        // 2. Tentar extrair dados do cliente
+        const extractedData = await aiService.extractCustomerData(message, classification);
+        
+        if (extractedData) {
+          // 3. Validar dados
+          const validation = aiService.validateData(extractedData, classification);
+          
+          if (validation.valid) {
+            // Mensagem completa! Processar diretamente
+            console.log('✅ Mensagem completa detectada - processando diretamente');
+            
+            sessionService.updateSession(phone, {
+              consortiumType: classification,
+              data: extractedData,
+              state: 'PROCESSING'
+            });
+
+            // Enviar mensagem de processamento
+            await whatsappService.sendProcessingMessage(phone);
+
+            // Gerar cotação via RPA
+            await this.generateQuotation(phone, classification, extractedData);
+            return;
+          }
+        }
+      }
+    } catch (error) {
+      console.log('⚠️ Não foi possível processar mensagem completa, seguindo fluxo normal');
+      // Continua com o fluxo normal abaixo
+    }
+
+    // Se não conseguiu processar como mensagem completa, seguir fluxo normal
+    // Classificar apenas o tipo
+    const classification = await aiService.classifyConsortiumType(message);
+    
+    if (classification && classification !== 'OUTROS') {
+      // Tem tipo, mas falta dados - solicitar dados
+      sessionService.updateSession(phone, {
+        consortiumType: classification,
+        state: 'AWAITING_DATA'
+      });
+
+      if (classification === 'CARRO') {
+        await whatsappService.requestCarData(phone);
+      } else if (classification === 'IMOVEL') {
+        await whatsappService.requestPropertyData(phone);
+      }
+    } else {
+      // Não conseguiu identificar tipo - enviar boas-vindas
+      await whatsappService.sendWelcomeMessage(phone);
+      sessionService.updateSession(phone, { state: 'AWAITING_TYPE' });
+    }
   }
 
   /**
