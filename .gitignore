@@ -32,3 +32,6 @@ Thumbs.db
 # Temporary files
 temp/
 tmp/
+
+# Frontend (test interface - not needed in production)
+frontend/

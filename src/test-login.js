@@ -38,19 +38,17 @@ async function testLogin() {
     if (loginSuccess) {
       console.log('\n✅✅✅ LOGIN AUTOMÁTICO FUNCIONANDO CORRETAMENTE! ✅✅✅\n');
       
-      // Navegar para página de listagem de planos e capturar screenshot
+      // Navegar para página de listagem de planos
       console.log('📋 Navegando para página de listagem de planos...\n');
       await canopusRPA.navigateToPlansList();
       
       console.log('\n✅✅✅ PROCESSO COMPLETO FINALIZADO COM SUCESSO! ✅✅✅\n');
-      console.log('📸 Screenshot salvo em: ./screenshots/listagem-planos-*.png\n');
     } else {
       console.log('\n❌❌❌ LOGIN FALHOU ❌❌❌\n');
       console.log('💡 Verifique:');
       console.log('   1. Se as credenciais no .env estão corretas');
       console.log('   2. Se a URL do Canopus está correta');
-      console.log('   3. Os screenshots em ./screenshots/ para ver o que aconteceu');
-      console.log('   4. Se os seletores no código correspondem ao site real\n');
+      console.log('   3. Se os seletores no código correspondem ao site real\n');
     }
 
     // Manter navegador aberto por alguns segundos para inspeção
@@ -76,9 +74,8 @@ async function testLogin() {
     console.log('   1. Verifique se CANOPUS_URL, CANOPUS_USERNAME e CANOPUS_PASSWORD estão no .env');
     console.log('   2. Verifique se a URL do Canopus está correta e acessível');
     console.log('   3. Verifique se as credenciais estão corretas');
-    console.log('   4. Confira os screenshots em ./screenshots/ para ver o que aconteceu');
-    console.log('   5. Os seletores no código podem precisar ser ajustados para o site real');
-    console.log('   6. Verifique se há captcha ou autenticação de dois fatores\n');
+    console.log('   4. Os seletores no código podem precisar ser ajustados para o site real');
+    console.log('   5. Verifique se há captcha ou autenticação de dois fatores\n');
     
     // Tentar fechar navegador mesmo em caso de erro
     try {

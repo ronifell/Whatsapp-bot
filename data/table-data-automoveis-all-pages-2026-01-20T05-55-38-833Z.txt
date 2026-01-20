@@ -1,6 +1,6 @@
 === DADOS DA TABELA - AUTOMOVEIS (TODAS AS PÁGINAS) ===
 
-Data/Hora de Extração: 19/01/2026, 13:00:01
+Data/Hora de Extração: 19/01/2026, 21:55:38
 Total de Páginas: 20
 Total de Registros: 181
 

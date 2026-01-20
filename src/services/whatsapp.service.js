@@ -1,8 +1,10 @@
 import axios from 'axios';
 import { config } from '../config/config.js';
+import messageBus from './message-bus.service.js';
 
 /**
  * Serviço de integração com Z-API para WhatsApp
+ * Também suporta modo frontend (para desenvolvimento/teste)
  */
 class WhatsAppService {
   constructor() {
@@ -20,10 +22,31 @@ class WhatsAppService {
   }
 
   /**
+   * Verifica se está em modo frontend (para desenvolvimento)
+   */
+  isFrontendMode() {
+    return messageBus.isFrontendMode();
+  }
+
+  /**
+   * Verifica se o phone é de um usuário frontend
+   */
+  isFrontendUser(phone) {
+    return phone && (phone.startsWith('frontend-') || this.isFrontendMode());
+  }
+
+  /**
    * Envia uma mensagem de texto para um número
    */
   async sendMessage(phone, message) {
     try {
+      // Modo frontend: enviar para message bus
+      if (this.isFrontendUser(phone)) {
+        messageBus.addMessage(phone, message, 'bot');
+        console.log(`📱 [FRONTEND MODE] Mensagem enviada para ${phone}`);
+        return { success: true, frontendMode: true };
+      }
+
       // Modo de teste: apenas logar, não enviar realmente
       if (this.isTestMode()) {
         console.log('\n📱 [MODO TESTE] Mensagem que seria enviada:');
@@ -51,6 +74,13 @@ class WhatsAppService {
    */
   async sendMessageWithLink(phone, message) {
     try {
+      // Modo frontend: enviar para message bus
+      if (this.isFrontendUser(phone)) {
+        messageBus.addMessage(phone, message, 'bot');
+        console.log(`📱 [FRONTEND MODE] Mensagem com link enviada para ${phone}`);
+        return { success: true, frontendMode: true };
+      }
+
       // Modo de teste: apenas logar, não enviar realmente
       if (this.isTestMode()) {
         console.log('\n📱 [MODO TESTE] Mensagem com link que seria enviada:');
@@ -78,6 +108,14 @@ class WhatsAppService {
    */
   async sendDocument(phone, documentUrl, fileName) {
     try {
+      // Modo frontend: enviar mensagem sobre o documento
+      if (this.isFrontendUser(phone)) {
+        const message = `📄 Documento: ${fileName}\n${documentUrl}`;
+        messageBus.addMessage(phone, message, 'bot');
+        console.log(`📱 [FRONTEND MODE] Documento enviado para ${phone}`);
+        return { success: true, frontendMode: true };
+      }
+
       // Modo de teste: apenas logar, não enviar realmente
       if (this.isTestMode()) {
         console.log('\n📱 [MODO TESTE] Documento que seria enviado:');
@@ -107,6 +145,14 @@ class WhatsAppService {
    */
   async sendImage(phone, imageUrl, caption = '') {
     try {
+      // Modo frontend: enviar mensagem sobre a imagem
+      if (this.isFrontendUser(phone)) {
+        const message = caption ? `🖼️ ${caption}\n${imageUrl}` : `🖼️ Imagem: ${imageUrl}`;
+        messageBus.addMessage(phone, message, 'bot');
+        console.log(`📱 [FRONTEND MODE] Imagem enviada para ${phone}`);
+        return { success: true, frontendMode: true };
+      }
+
       // Modo de teste: apenas logar, não enviar realmente
       if (this.isTestMode()) {
         console.log('\n📱 [MODO TESTE] Imagem que seria enviada:');
@@ -164,15 +210,11 @@ class WhatsAppService {
 
 Bem-vindo ao *CotaFácil Alphaville*!
 
-Aqui você pode fazer cotações de consórcio de forma rápida e automática. 
+Sou seu assistente virtual e estou aqui para ajudar com tudo sobre consórcio.
 
-Por favor, me informe qual tipo de consórcio você deseja cotar:
+Posso responder suas dúvidas sobre consórcio de automóvel, imóvel, ou outros tipos. E quando você estiver pronto, também posso gerar uma cotação personalizada para você.
 
-1️⃣ *Consórcio de Automóvel*
-2️⃣ *Consórcio de Imóvel*
-3️⃣ *Consultoria/Outros*
-
-Digite o número da opção ou descreva sua necessidade.`;
+Como posso te ajudar hoje? 😊`;
 
     return this.sendMessage(phone, message);
   }
@@ -290,7 +332,14 @@ ${JSON.stringify(customerData, null, 2)}
 ---
 Por favor, entre em contato com o cliente.`;
 
-    await this.sendMessage(adminNumber, messageToAdmin);
+    // Only send to admin if not a frontend user (frontend users are for testing)
+    // In frontend mode, just log the notification
+    if (this.isFrontendUser(phone)) {
+      console.log('📢 [FRONTEND MODE] Notificação de atendimento humano:');
+      console.log(messageToAdmin);
+    } else {
+      await this.sendMessage(adminNumber, messageToAdmin);
+    }
 
     const messageToCustomer = `👨‍💼 *Encaminhando para Atendimento Especializado*
 

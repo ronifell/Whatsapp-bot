@@ -1,12 +1,24 @@
 import express from 'express';
 import { config, validateConfig } from './config/config.js';
 import orchestrator from './services/orchestrator.service.js';
+import messageBus from './services/message-bus.service.js';
 
 const app = express();
 
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// CORS para frontend
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
 
 /**
  * Health check endpoint
@@ -99,6 +111,132 @@ app.get('/stats', (req, res) => {
       updatedAt: s.updatedAt
     }))
   });
+});
+
+/**
+ * API para frontend: Enviar mensagem do cliente
+ */
+app.post('/api/frontend/message', async (req, res) => {
+  try {
+    const { phone, message } = req.body;
+
+    if (!phone || !message) {
+      return res.status(400).json({ error: 'phone e message são obrigatórios' });
+    }
+
+    // NOT adding user message to message bus here - frontend adds it directly to UI
+    // This prevents duplicate user messages appearing via SSE
+    
+    // Responder rapidamente ao cliente
+    res.json({ 
+      status: 'success',
+      message: 'Mensagem recebida'
+    });
+
+    // Processar mensagem de forma assíncrona (não bloquear resposta)
+    setImmediate(async () => {
+      try {
+        console.log(`🔄 Processing message from ${phone}: "${message}"`);
+        await orchestrator.processMessage(phone, message);
+        console.log(`✅ Message processed successfully for ${phone}`);
+      } catch (error) {
+        console.error('❌ Erro ao processar mensagem do frontend:', error);
+        // Enviar mensagem de erro via message bus
+        try {
+          messageBus.addMessage(phone, '❌ Ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.', 'bot');
+        } catch (busError) {
+          console.error('❌ Erro ao enviar mensagem de erro:', busError);
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Erro no endpoint de mensagem do frontend:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * API para frontend: Obter mensagens
+ */
+app.get('/api/frontend/messages/:phone', (req, res) => {
+  try {
+    const { phone } = req.params;
+    const { since } = req.query;
+
+    const messages = messageBus.getMessages(phone, since || null);
+
+    res.json({ 
+      status: 'success',
+      messages: messages
+    });
+
+  } catch (error) {
+    console.error('❌ Erro ao obter mensagens:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * API para frontend: Server-Sent Events (SSE) para mensagens em tempo real
+ */
+app.get('/api/frontend/messages/:phone/stream', (req, res) => {
+  try {
+    const { phone } = req.params;
+
+    // Configurar headers para SSE
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering if present
+
+    // Flush headers immediately
+    res.flushHeaders();
+
+    console.log(`🔌 Setting up SSE stream for ${phone}`);
+
+    // Registrar conexão SSE
+    messageBus.registerSSE(phone, res);
+
+    // Enviar mensagens pendentes
+    const existingMessages = messageBus.getMessages(phone);
+    console.log(`📬 Sending ${existingMessages.length} existing messages to ${phone}`);
+    existingMessages.forEach(msg => {
+      const sseData = { eventType: 'message', ...msg };
+      res.write(`data: ${JSON.stringify(sseData)}\n\n`);
+    });
+
+    // Keep-alive ping
+    const pingInterval = setInterval(() => {
+      try {
+        if (!res.writableEnded && !res.destroyed) {
+          res.write(`data: ${JSON.stringify({ type: 'ping' })}\n\n`);
+        } else {
+          clearInterval(pingInterval);
+        }
+      } catch (error) {
+        console.error('Error sending ping:', error);
+        clearInterval(pingInterval);
+      }
+    }, 30000); // ping a cada 30 segundos
+
+    // Limpar ao desconectar
+    req.on('close', () => {
+      console.log(`🔌 SSE connection closed for ${phone}`);
+      clearInterval(pingInterval);
+      messageBus.unregisterSSE(phone, res);
+    });
+
+    req.on('error', (error) => {
+      console.error(`❌ SSE connection error for ${phone}:`, error);
+      clearInterval(pingInterval);
+      messageBus.unregisterSSE(phone, res);
+    });
+
+  } catch (error) {
+    console.error('❌ Erro no SSE:', error);
+    res.status(500).end();
+  }
 });
 
 /**

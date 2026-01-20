@@ -77,8 +77,7 @@ async function testRPA() {
     await canopusRPA.close();
     console.log('✅ Navegador fechado\n');
 
-    console.log('✅ Teste concluído com sucesso!');
-    console.log('\n📸 Screenshots salvos em: ./screenshots/\n');
+    console.log('✅ Teste concluído com sucesso!\n');
 
     process.exit(0);
 
@@ -92,8 +91,7 @@ async function testRPA() {
     console.log('\n💡 Dicas para resolver:');
     console.log('   1. Verifique se as credenciais do Canopus estão corretas no .env');
     console.log('   2. Verifique se a URL do Canopus está correta');
-    console.log('   3. Os seletores no código precisam ser ajustados para o site real');
-    console.log('   4. Confira os screenshots salvos em ./screenshots/\n');
+    console.log('   3. Os seletores no código precisam ser ajustados para o site real\n');
     
     process.exit(1);
   }

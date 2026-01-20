@@ -393,10 +393,9 @@ class CanopusRPAService {
       if (!usernameFilled) {
         console.error('❌ Não foi possível encontrar o campo de usuário.');
         console.error('💡 Dicas:');
-        console.error('   1. Verifique o screenshot em ./screenshots/01-login-page-*.png');
-        console.error('   2. Inspecione a página no navegador para encontrar o seletor correto');
-        console.error('   3. Adicione o seletor correto em src/services/canopus-rpa.service.js');
-        throw new Error('Não foi possível encontrar o campo de usuário. Verifique os seletores no código e o screenshot.');
+        console.error('   1. Inspecione a página no navegador para encontrar o seletor correto');
+        console.error('   2. Adicione o seletor correto em src/services/canopus-rpa.service.js');
+        throw new Error('Não foi possível encontrar o campo de usuário. Verifique os seletores no código.');
       }
 
       // Procurar campo de senha
@@ -475,10 +474,9 @@ class CanopusRPAService {
       if (!passwordFilled) {
         console.error('❌ Não foi possível encontrar o campo de senha.');
         console.error('💡 Dicas:');
-        console.error('   1. Verifique o screenshot em ./screenshots/02-credentials-filled-*.png');
-        console.error('   2. Inspecione a página no navegador para encontrar o seletor correto');
-        console.error('   3. Adicione o seletor correto em src/services/canopus-rpa.service.js');
-        throw new Error('Não foi possível encontrar o campo de senha. Verifique os seletores no código e o screenshot.');
+        console.error('   1. Inspecione a página no navegador para encontrar o seletor correto');
+        console.error('   2. Adicione o seletor correto em src/services/canopus-rpa.service.js');
+        throw new Error('Não foi possível encontrar o campo de senha. Verifique os seletores no código.');
       }
 
       // Aguardar um pouco para Angular processar as mudanças e validar o formulário
@@ -605,10 +603,9 @@ class CanopusRPAService {
       if (!buttonClicked) {
         console.error('❌ Não foi possível encontrar o botão de login.');
         console.error('💡 Dicas:');
-        console.error('   1. Verifique o screenshot em ./screenshots/02-credentials-filled-*.png');
-        console.error('   2. Inspecione a página no navegador para encontrar o seletor correto');
-        console.error('   3. Adicione o seletor correto em src/services/canopus-rpa.service.js');
-        throw new Error('Não foi possível encontrar o botão de login. Verifique os seletores no código e o screenshot.');
+        console.error('   1. Inspecione a página no navegador para encontrar o seletor correto');
+        console.error('   2. Adicione o seletor correto em src/services/canopus-rpa.service.js');
+        throw new Error('Não foi possível encontrar o botão de login. Verifique os seletores no código.');
       }
 
       // Aguardar navegação após login
@@ -670,10 +667,10 @@ class CanopusRPAService {
           );
 
           if (hasError) {
-            throw new Error('Login falhou. Verifique os screenshots em ./screenshots/ para ver o erro específico.');
+            throw new Error('Login falhou. Verifique os logs para ver o erro específico.');
           } else {
             // Se não encontrou erro explícito, mas também não confirmou sucesso, assumir falha
-            throw new Error('Não foi possível confirmar se o login foi bem-sucedido. Verifique os screenshots em ./screenshots/');
+            throw new Error('Não foi possível confirmar se o login foi bem-sucedido.');
           }
         }
       }
@@ -689,7 +686,6 @@ class CanopusRPAService {
       return true;
     } catch (error) {
       console.error('❌ Erro ao fazer login:', error.message);
-      await this.screenshot('error-login');
       this.isLoggedIn = false;
       throw error;
     }
@@ -802,18 +798,63 @@ class CanopusRPAService {
       await table.waitFor({ state: 'visible', timeout: 30000 });
       await this.page.waitForTimeout(3000);
       
-      // Capturar screenshot apenas desta página
-      console.log('📸 Capturando screenshot da página de planos...');
-      await this.screenshot('listagem-planos');
-      console.log('✅ Screenshot capturado com sucesso!');
-      
       // Scrape e salvar dados do grid-body
       console.log('📊 Extraindo dados do grid...');
-      await this.scrapeAndSaveGridData();
+      await this.scrapeAndSaveGridData(null, null, false, 'automoveis');
       console.log('✅ Dados extraídos e salvos com sucesso!');
       
     } catch (error) {
       console.error('❌ Erro ao navegar para página de planos:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Navega para a página de listagem de planos, seleciona IMOVEIS e captura dados
+   * Não seleciona o radio button IPCA (diferente de AUTOMOVEIS)
+   */
+  async navigateToPlansListForImoveis() {
+    try {
+      const plansUrl = 'https://afv.consorciocanopus.com.br/Sistema/planos/listagem_planos.php';
+      
+      console.log(`📋 Navegando para página de planos: ${plansUrl}`);
+      await this.navigateTo(plansUrl);
+      
+      // Aguardar página carregar completamente
+      console.log('⏳ Aguardando página de planos carregar...');
+      await this.page.waitForTimeout(5000);
+      
+      try {
+        await this.page.waitForLoadState('load', { timeout: 30000 });
+      } catch (e) {
+        await this.page.waitForLoadState('domcontentloaded', { timeout: 15000 });
+      }
+      
+      await this.page.waitForTimeout(3000);
+      
+      // Selecionar "IMOVEIS" no dropdown
+      console.log('🔽 Selecionando "IMOVEIS" no dropdown...');
+      await this.selectImoveis();
+      
+      // Aguardar grid atualizar após seleção
+      console.log('⏳ Aguardando grid atualizar...');
+      await this.page.waitForTimeout(5000);
+      
+      // NOTA: Para IMOVEIS, não selecionamos o radio button IPCA
+      // A tabela já deve estar pronta após selecionar IMOVEIS
+      
+      // Aguardar tabela estar visível e carregada
+      const table = await this.page.locator('table.table.no-more-tables.table-striped.table-hover.dataTable.no-footer, table.dataTable').first();
+      await table.waitFor({ state: 'visible', timeout: 30000 });
+      await this.page.waitForTimeout(3000);
+      
+      // Scrape e salvar dados do grid-body
+      console.log('📊 Extraindo dados do grid (IMOVEIS)...');
+      await this.scrapeAndSaveGridData(null, null, false, 'imoveis');
+      console.log('✅ Dados extraídos e salvos com sucesso!');
+      
+    } catch (error) {
+      console.error('❌ Erro ao navegar para página de planos (IMOVEIS):', error.message);
       throw error;
     }
   }
@@ -1111,6 +1152,92 @@ class CanopusRPAService {
       
     } catch (error) {
       console.error('❌ Erro ao selecionar AUTOMOVEIS:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Seleciona "IMOVEIS" no dropdown
+   */
+  async selectImoveis() {
+    try {
+      // Procurar o span com texto "Selecione..."
+      const selectSpan = await this.page.locator('span:has-text("Selecione...")').first();
+      await selectSpan.waitFor({ state: 'visible', timeout: 15000 });
+      
+      console.log('✅ Span "Selecione..." encontrado');
+      
+      // Clicar no span para abrir o dropdown
+      await selectSpan.click();
+      await this.page.waitForTimeout(1000);
+      
+      // Procurar e clicar na opção "IMOVEIS"
+      // Pode ser um link, option, ou outro elemento dentro do dropdown
+      const imoveisSelectors = [
+        'text="IMOVEIS"',
+        'text="IMÓVEIS"',
+        'text="Imoveis"',
+        'text="Imóveis"',
+        'a:has-text("IMOVEIS")',
+        'a:has-text("IMÓVEIS")',
+        'option:has-text("IMOVEIS")',
+        'option:has-text("IMÓVEIS")',
+        '[value="IMOVEIS"]',
+        '[value="IMÓVEIS"]',
+        'li:has-text("IMOVEIS")',
+        'li:has-text("IMÓVEIS")'
+      ];
+      
+      let optionSelected = false;
+      
+      for (const selector of imoveisSelectors) {
+        try {
+          const option = await this.page.locator(selector).first();
+          if (await option.isVisible({ timeout: 2000 })) {
+            await option.click();
+            console.log(`✅ Opção "IMOVEIS" selecionada (seletor: ${selector})`);
+            optionSelected = true;
+            break;
+          }
+        } catch (e) {
+          // Tentar próximo seletor
+        }
+      }
+      
+      // Se não encontrou, tentar estratégia alternativa: buscar por texto exato
+      if (!optionSelected) {
+        console.log('⚠️  Tentando estratégia alternativa para selecionar IMOVEIS...');
+        try {
+          // Buscar todos os elementos clicáveis que contenham "IMOVEIS" ou "IMÓVEIS"
+          const allElements = await this.page.locator('*').all();
+          for (const element of allElements) {
+            try {
+              const text = await element.textContent();
+              if (text && (text.includes('IMOVEIS') || text.includes('IMÓVEIS') || text.includes('Imoveis') || text.includes('Imóveis'))) {
+                if (await element.isVisible({ timeout: 1000 })) {
+                  await element.click();
+                  console.log('✅ Opção "IMOVEIS" selecionada (busca por texto)');
+                  optionSelected = true;
+                  break;
+                }
+              }
+            } catch (e) {
+              // Continuar
+            }
+          }
+        } catch (e) {
+          // Ignorar
+        }
+      }
+      
+      if (!optionSelected) {
+        throw new Error('Não foi possível encontrar e selecionar a opção "IMOVEIS" no dropdown');
+      }
+      
+      await this.page.waitForTimeout(2000);
+      
+    } catch (error) {
+      console.error('❌ Erro ao selecionar IMOVEIS:', error.message);
       throw error;
     }
   }
@@ -1515,7 +1642,7 @@ class CanopusRPAService {
   /**
    * Extrai e salva todos os dados da tabela de planos de todas as páginas
    */
-  async scrapeAndSaveGridData() {
+  async scrapeAndSaveGridData(customerValue = null, customerTerm = null, stopOnExactMatch = false, consortiumType = 'automoveis') {
     try {
       // Aguardar tabela estar presente
       const tableSelector = 'table.table.no-more-tables.table-striped.table-hover.dataTable.no-footer, table.dataTable, table#table';
@@ -1524,6 +1651,11 @@ class CanopusRPAService {
       
       console.log('📄 Extraindo dados de todas as páginas...');
       
+      // Modo otimizado: buscar durante extração
+      if (customerValue && customerTerm) {
+        console.log(`🎯 Modo otimizado: buscando plano (R$ ${customerValue.toLocaleString('pt-BR')}, ${customerTerm} meses)`);
+      }
+      
       // Extrair cabeçalhos da primeira página
       const firstPageData = await this.extractTablePageData();
       const headers = firstPageData.headers;
@@ -1531,22 +1663,34 @@ class CanopusRPAService {
       
       console.log(`✅ Página 1 extraída: ${firstPageData.rows.length} registros`);
       
+      // OTIMIZAÇÃO: Verificar match na primeira página se parâmetros fornecidos
+      let bestMatchSoFar = null;
+      let earlyTermination = false;
+      let exactMatchFound = false;
+      let exactMatchPage = null;
+      const PAGES_AFTER_EXACT_MATCH = 3; // Continuar por 3 páginas após match exato
+      
+      if (customerValue && customerTerm) {
+        bestMatchSoFar = this.findBestMatchInPageData(firstPageData, customerValue, customerTerm);
+        
+        if (bestMatchSoFar) {
+          const valueDiff = bestMatchSoFar.valueDifference;
+          const termDiff = bestMatchSoFar.termDifference;
+          
+          if (stopOnExactMatch && valueDiff <= 100 && termDiff === 0) {
+            console.log('✅ Match exato encontrado na primeira página! Continuando por mais algumas páginas para verificar melhor opção...');
+            exactMatchFound = true;
+            exactMatchPage = 1;
+          }
+        }
+      }
+      
       // Obter total de páginas
       let totalPages = await this.getTotalPages();
       
-      // Se detectou menos de 19 páginas mas sabemos que há 19, forçar 19
-      if (totalPages && totalPages < 19) {
-        console.log(`⚠️  Detectado ${totalPages} páginas, mas sabemos que há 19. Tentando detectar novamente...`);
-        // Tentar obter novamente com mais scroll
-        const retryTotalPages = await this.getTotalPages();
-        if (retryTotalPages && retryTotalPages > totalPages) {
-          totalPages = retryTotalPages;
-        }
-        // Se ainda não detectou 19, usar estratégia de Next button que é mais confiável
-        if (totalPages < 19) {
-          console.log(`⚠️  Usando estratégia de Next button para garantir todas as 19 páginas`);
-          totalPages = null; // Forçar uso da estratégia Next
-        }
+      // Não forçar número específico de páginas - usar o valor detectado
+      if (totalPages) {
+        console.log(`ℹ️  Total de páginas detectado: ${totalPages}`);
       }
       
       // Se não conseguiu obter total de páginas ou detectou menos que o esperado, usar estratégia de "Next" button
@@ -1556,23 +1700,17 @@ class CanopusRPAService {
         // Usar estratégia de "Next" button até não conseguir mais avançar
         let currentPage = 1;
         let canContinue = true;
-        const expectedPages = 19; // Sabemos que há 19 páginas
-        const maxPages = 25; // Limite máximo para prevenir loops infinitos (um pouco acima do esperado)
+        const maxPages = 50; // Limite máximo para prevenir loops infinitos
         let consecutiveFailures = 0;
         const maxConsecutiveFailures = 3;
         let lastPageData = null; // Para detectar se voltamos para uma página já visitada
         
         while (canContinue && currentPage < maxPages) {
-          // Se já extraímos 19 páginas e o Next ainda está habilitado, continuar
-          // Mas verificar se não estamos em loop
-          if (currentPage >= expectedPages) {
-            const isLast = await this.isLastPage();
-            if (isLast) {
-              console.log(`ℹ️  Detectado que estamos na última página (${currentPage}), finalizando...`);
-              break;
-            }
-            // Se não é a última mas já temos 19, verificar se estamos vendo dados novos
-            console.log(`ℹ️  Já extraímos ${currentPage} páginas, verificando se há mais...`);
+          // Verificar se estamos na última página ANTES de tentar navegar
+          const isLast = await this.isLastPage();
+          if (isLast) {
+            console.log(`ℹ️  Detectado que estamos na última página (${currentPage}), finalizando...`);
+            break;
           }
           
           canContinue = await this.navigateToNextPage();
@@ -1581,6 +1719,14 @@ class CanopusRPAService {
             currentPage++;
             console.log(`📄 Navegando para página ${currentPage}...`);
             
+            // Aguardar tabela carregar (usar waitForSelector em vez de waitForTimeout quando possível)
+            try {
+              await this.page.waitForSelector(tableSelector, { state: 'visible', timeout: 5000 });
+            } catch (e) {
+              // Se falhar, usar timeout como fallback
+              await this.page.waitForTimeout(500);
+            }
+            
             // Extrair dados desta página
             const pageData = await this.extractTablePageData();
             
@@ -1588,6 +1734,48 @@ class CanopusRPAService {
             if (pageData.rows.length === 0) {
               console.log('ℹ️  Nenhum dado encontrado nesta página, finalizando...');
               break;
+            }
+            
+            // OTIMIZAÇÃO: Verificar match enquanto extrai
+            if (customerValue && customerTerm && !earlyTermination) {
+              const pageMatch = this.findBestMatchInPageData(pageData, customerValue, customerTerm);
+              if (pageMatch) {
+                const valueDiff = pageMatch.valueDifference;
+                const termDiff = pageMatch.termDifference;
+                
+                // Atualizar melhor match se este for melhor
+                if (!bestMatchSoFar || 
+                    (bestMatchSoFar.valueDifference + bestMatchSoFar.termDifference * 1000) >
+                    (valueDiff + termDiff * 1000)) {
+                  bestMatchSoFar = pageMatch;
+                }
+                
+                // Verificar se encontrou match exato
+                if (valueDiff <= 100 && termDiff === 0) {
+                  if (!exactMatchFound) {
+                    console.log(`✅ Match exato encontrado na página ${currentPage}! Continuando por mais ${PAGES_AFTER_EXACT_MATCH} páginas para verificar melhor opção...`);
+                    exactMatchFound = true;
+                    exactMatchPage = currentPage;
+                  }
+                }
+                
+                // Parar após algumas páginas do match exato (se stopOnExactMatch estiver ativo)
+                if (stopOnExactMatch && exactMatchFound && 
+                    currentPage >= exactMatchPage + PAGES_AFTER_EXACT_MATCH) {
+                  console.log(`✅ Match exato confirmado após verificar ${PAGES_AFTER_EXACT_MATCH} páginas adicionais. Parando extração...`);
+                  earlyTermination = true;
+                  
+                  // Ainda adicionar os dados desta página antes de parar
+                  const startRowNumber = allRows.length + 1;
+                  pageData.rows.forEach((row, index) => {
+                    row.rowNumber = startRowNumber + index;
+                    allRows.push(row);
+                  });
+                  
+                  // Sair do loop
+                  break;
+                }
+              }
             }
             
             // Verificar se estamos vendo dados duplicados (mesma primeira linha)
@@ -1633,10 +1821,18 @@ class CanopusRPAService {
             
             console.log(`✅ Página ${currentPage} extraída: ${pageData.rows.length} registros (Total acumulado: ${allRows.length})`);
             
+            // Verificar novamente se estamos na última página após extrair dados
+            const isLastAfterExtract = await this.isLastPage();
+            if (isLastAfterExtract) {
+              console.log(`ℹ️  Confirmado que estamos na última página após extrair página ${currentPage}, finalizando...`);
+              break;
+            }
+            
             // Salvar dados desta página para comparação futura
             lastPageData = pageData;
             
-            await this.page.waitForTimeout(1000);
+            // OTIMIZAÇÃO: Reduzir wait time de 1000ms para 500ms (mais conservador que 300ms)
+            await this.page.waitForTimeout(500);
           } else {
             consecutiveFailures++;
             if (consecutiveFailures >= maxConsecutiveFailures) {
@@ -1653,26 +1849,34 @@ class CanopusRPAService {
           console.warn(`⚠️  Limite máximo de ${maxPages} páginas atingido, parando extração`);
         }
         
-        totalPages = currentPage;
-        console.log(`📚 Total de páginas processadas: ${totalPages}`);
+        totalPages = earlyTermination ? currentPage : currentPage;
+        if (earlyTermination) {
+          console.log(`📚 Total de páginas processadas: ${totalPages} (parada antecipada após match exato)`);
+        } else {
+          console.log(`📚 Total de páginas processadas: ${totalPages}`);
+        }
       } else {
         console.log(`📚 Total de páginas encontradas: ${totalPages}`);
         
         // Extrair dados das páginas restantes
         // Usar estratégia híbrida: tentar navegar diretamente, mas usar Next como fallback
-        const expectedPages = 19;
         let lastExtractedPage = 1;
         let consecutiveFailures = 0;
         const maxConsecutiveFailures = 3;
+        const maxPages = totalPages ? Math.min(totalPages + 2, 50) : 50; // Limite baseado no total detectado + margem de segurança
         
-        for (let pageNum = 2; pageNum <= Math.max(totalPages, expectedPages) && pageNum <= 25; pageNum++) {
-          // Verificar se estamos na última página antes de tentar navegar
-          if (pageNum > 2) {
-            const isLast = await this.isLastPage();
-            if (isLast && lastExtractedPage >= expectedPages) {
-              console.log(`ℹ️  Detectado que estamos na última página (${lastExtractedPage}), finalizando...`);
-              break;
-            }
+        for (let pageNum = 2; pageNum <= maxPages; pageNum++) {
+          // Verificar se estamos na última página ANTES de tentar navegar
+          const isLast = await this.isLastPage();
+          if (isLast) {
+            console.log(`ℹ️  Detectado que estamos na última página (${lastExtractedPage}), finalizando...`);
+            break;
+          }
+          
+          // Se temos totalPages detectado e já passamos dele, parar
+          if (totalPages && pageNum > totalPages) {
+            console.log(`ℹ️  Já extraímos todas as ${totalPages} páginas detectadas, finalizando...`);
+            break;
           }
           
           console.log(`📄 Tentando navegar para página ${pageNum}...`);
@@ -1756,43 +1960,54 @@ class CanopusRPAService {
           lastExtractedPage = pageNum;
           console.log(`✅ Página ${pageNum} extraída: ${pageData.rows.length} registros (Total acumulado: ${allRows.length})`);
           
+          // Verificar novamente se estamos na última página após extrair dados
+          const isLastAfterExtract = await this.isLastPage();
+          if (isLastAfterExtract) {
+            console.log(`ℹ️  Confirmado que estamos na última página após extrair página ${pageNum}, finalizando...`);
+            break;
+          }
+          
           // Pequena pausa entre páginas
           await this.page.waitForTimeout(1000);
         }
         
-        // Se ainda não extraímos todas as 19 páginas, continuar com Next button
-        if (lastExtractedPage < expectedPages) {
-          console.log(`⚠️  Apenas ${lastExtractedPage} páginas extraídas, continuando com botão Next até página ${expectedPages}...`);
-          while (lastExtractedPage < expectedPages) {
-            const isLast = await this.isLastPage();
-            if (isLast) {
-              console.log(`ℹ️  Chegamos na última página (${lastExtractedPage})`);
-              break;
+        // Se ainda não extraímos todas as páginas detectadas e não estamos na última, continuar com Next button
+        // Mas apenas se não tivermos um totalPages detectado ou se ainda estivermos abaixo dele
+        if ((!totalPages || lastExtractedPage < totalPages) && lastExtractedPage < maxPages) {
+          const isLast = await this.isLastPage();
+          if (!isLast) {
+            console.log(`⚠️  Apenas ${lastExtractedPage} páginas extraídas, continuando com botão Next...`);
+            while ((!totalPages || lastExtractedPage < totalPages) && lastExtractedPage < maxPages) {
+              const isLastNow = await this.isLastPage();
+              if (isLastNow) {
+                console.log(`ℹ️  Chegamos na última página (${lastExtractedPage})`);
+                break;
+              }
+              
+              const nextSuccess = await this.navigateToNextPage();
+              if (!nextSuccess) {
+                console.log(`ℹ️  Não foi possível navegar para próxima página, finalizando em ${lastExtractedPage}`);
+                break;
+              }
+              
+              lastExtractedPage++;
+              console.log(`📄 Extraindo página ${lastExtractedPage}...`);
+              
+              const pageData = await this.extractTablePageData();
+              if (pageData.rows.length === 0) {
+                console.log(`ℹ️  Nenhum dado na página ${lastExtractedPage}, finalizando...`);
+                break;
+              }
+              
+              const startRowNumber = allRows.length + 1;
+              pageData.rows.forEach((row, index) => {
+                row.rowNumber = startRowNumber + index;
+                allRows.push(row);
+              });
+              
+              console.log(`✅ Página ${lastExtractedPage} extraída: ${pageData.rows.length} registros (Total acumulado: ${allRows.length})`);
+              await this.page.waitForTimeout(1000);
             }
-            
-            const nextSuccess = await this.navigateToNextPage();
-            if (!nextSuccess) {
-              console.log(`ℹ️  Não foi possível navegar para próxima página, finalizando em ${lastExtractedPage}`);
-              break;
-            }
-            
-            lastExtractedPage++;
-            console.log(`📄 Extraindo página ${lastExtractedPage}...`);
-            
-            const pageData = await this.extractTablePageData();
-            if (pageData.rows.length === 0) {
-              console.log(`ℹ️  Nenhum dado na página ${lastExtractedPage}, finalizando...`);
-              break;
-            }
-            
-            const startRowNumber = allRows.length + 1;
-            pageData.rows.forEach((row, index) => {
-              row.rowNumber = startRowNumber + index;
-              allRows.push(row);
-            });
-            
-            console.log(`✅ Página ${lastExtractedPage} extraída: ${pageData.rows.length} registros (Total acumulado: ${allRows.length})`);
-            await this.page.waitForTimeout(1000);
           }
         }
         
@@ -1810,9 +2025,18 @@ class CanopusRPAService {
       // Preparar dados para salvar (remover campos auxiliares _col_*)
       const cleanTableData = {
         extractedAt: new Date().toISOString(),
-        totalPages: totalPages,
+        totalPages: earlyTermination ? totalPages : totalPages,
         headers: headers,
         totalRows: allRows.length,
+        earlyTermination: earlyTermination,
+        bestMatch: bestMatchSoFar ? {
+          nomeBem: bestMatchSoFar.nomeBem,
+          valor: bestMatchSoFar.valor,
+          prazo: bestMatchSoFar.prazo,
+          primeiraParcela: bestMatchSoFar.primeiraParcela,
+          plano: bestMatchSoFar.plano,
+          tipoVenda: bestMatchSoFar.tipoVenda
+        } : null,
         rows: allRows.map(row => {
           const cleanRow = { ...row.data };
           // Remover campos auxiliares
@@ -1827,14 +2051,14 @@ class CanopusRPAService {
       
       // Salvar dados em JSON
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const jsonFilename = `table-data-automoveis-all-pages-${timestamp}.json`;
+      const jsonFilename = `table-data-${consortiumType}-all-pages-${timestamp}.json`;
       const jsonFilepath = path.join(dataDir, jsonFilename);
       
       fs.writeFileSync(jsonFilepath, JSON.stringify(cleanTableData, null, 2), 'utf-8');
       console.log(`💾 Dados salvos em JSON: ${jsonFilename}`);
       
       // Salvar também em formato CSV para fácil importação
-      const csvFilename = `table-data-automoveis-all-pages-${timestamp}.csv`;
+      const csvFilename = `table-data-${consortiumType}-all-pages-${timestamp}.csv`;
       const csvFilepath = path.join(dataDir, csvFilename);
       
       let csvContent = '';
@@ -1857,10 +2081,11 @@ class CanopusRPAService {
       console.log(`💾 Dados salvos em CSV: ${csvFilename}`);
       
       // Salvar também em formato texto legível
-      const txtFilename = `table-data-automoveis-all-pages-${timestamp}.txt`;
+      const txtFilename = `table-data-${consortiumType}-all-pages-${timestamp}.txt`;
       const txtFilepath = path.join(dataDir, txtFilename);
       
-      let textContent = '=== DADOS DA TABELA - AUTOMOVEIS (TODAS AS PÁGINAS) ===\n\n';
+      const consortiumTypeUpper = consortiumType.toUpperCase();
+      let textContent = `=== DADOS DA TABELA - ${consortiumTypeUpper} (TODAS AS PÁGINAS) ===\n\n`;
       textContent += `Data/Hora de Extração: ${new Date().toLocaleString('pt-BR')}\n`;
       textContent += `Total de Páginas: ${totalPages}\n`;
       textContent += `Total de Registros: ${allRows.length}\n\n`;
@@ -1905,6 +2130,74 @@ class CanopusRPAService {
       console.error('❌ Erro ao extrair dados do grid:', error.message);
       throw error;
     }
+  }
+
+  /**
+   * Verifica se uma página contém um plano que corresponde aos critérios do cliente
+   * Retorna o melhor match encontrado nesta página ou null
+   */
+  findBestMatchInPageData(pageData, customerValue, customerTerm) {
+    if (!pageData || !pageData.rows || pageData.rows.length === 0) {
+      return null;
+    }
+
+    const cleanCustomerValue = parseFloat(
+      customerValue.toString().replace(/[^\d,]/g, '').replace(',', '.')
+    );
+
+    let bestMatch = null;
+    let smallestDifference = Infinity;
+    const EXACT_MATCH_THRESHOLD = 100; // R$ 100 de diferença = match exato
+
+    for (const row of pageData.rows) {
+      try {
+        // Tentar diferentes formatos de chave (maiúsculas, minúsculas, com/sem espaços)
+        const rowData = row.data || row;
+        const planValueText = rowData['VALOR'] || rowData['Valor'] || rowData['valor'] || '';
+        const planValue = parseFloat(
+          planValueText.toString().replace(/[^\d,]/g, '').replace(',', '.')
+        );
+
+        if (isNaN(planValue) || planValue === 0) continue;
+
+        const planTermText = rowData['PRAZO'] || rowData['Prazo'] || rowData['prazo'] || '';
+        const planTerm = parseInt(planTermText.toString().replace(/\D/g, ''));
+
+        if (isNaN(planTerm) || planTerm === 0) continue;
+
+        const firstPaymentText = rowData['1ª PARCELA'] || rowData['1ª parcela'] || rowData['primeira_parcela'] || '';
+        const firstPayment = parseFloat(
+          firstPaymentText.toString().replace(/[^\d,]/g, '').replace(',', '.')
+        );
+
+        const termDifference = Math.abs(planTerm - customerTerm);
+        
+        // Se o prazo está próximo (diferença de até 10 meses)
+        if (termDifference <= 10) {
+          const valueDifference = Math.abs(planValue - cleanCustomerValue);
+          const totalDifference = valueDifference + (termDifference * 1000);
+
+          if (totalDifference < smallestDifference) {
+            smallestDifference = totalDifference;
+            bestMatch = {
+              nomeBem: rowData['NOME DO BEM'] || rowData['Nome do bem'] || rowData['nome_bem'] || '',
+              valor: planValue,
+              prazo: planTerm,
+              primeiraParcela: firstPayment || 0,
+              plano: rowData['PLANO'] || rowData['Plano'] || rowData['plano'] || '',
+              tipoVenda: rowData['TIPO DE VENDA'] || rowData['Tipo de Venda'] || rowData['tipo_venda'] || '',
+              rawData: rowData,
+              valueDifference: valueDifference,
+              termDifference: termDifference
+            };
+          }
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+
+    return bestMatch;
   }
 
   /**
@@ -1995,52 +2288,79 @@ class CanopusRPAService {
       console.log('📋 Acessando lista de planos...');
       await this.navigateToPlansList();
 
-      // Aguardar um pouco para garantir que o arquivo foi salvo
-      await this.page.waitForTimeout(2000);
-
-      // Carregar dados extraídos mais recentes
-      const dataDir = path.join(process.cwd(), 'data');
+      // OTIMIZAÇÃO: Chamar scrapeAndSaveGridData com parâmetros de busca
+      console.log('🔍 Buscando plano correspondente durante extração...');
+      let extractionResult = null;
+      let bestPlan = null;
       
-      // Verificar se o diretório existe
-      if (!fs.existsSync(dataDir)) {
-        throw new Error('Diretório de dados não encontrado. A extração pode ter falhado.');
+      try {
+        extractionResult = await this.scrapeAndSaveGridData(data.valor, data.prazo, true, 'automoveis');
+      } catch (error) {
+        console.warn('⚠️  Erro durante extração otimizada, tentando método tradicional...', error.message);
+        extractionResult = null;
       }
-
-      const files = fs.readdirSync(dataDir)
-        .filter(f => f.startsWith('table-data-automoveis-all-pages-') && f.endsWith('.json'))
-        .sort()
-        .reverse(); // Mais recente primeiro
-
-      if (files.length === 0) {
-        throw new Error('Nenhum arquivo de dados extraídos encontrado. A extração pode ter falhado.');
-      }
-
-      const latestFile = path.join(dataDir, files[0]);
-      console.log(`📂 Carregando dados de: ${files[0]}`);
       
-      // Tentar ler o arquivo (pode precisar de algumas tentativas se ainda estiver sendo escrito)
-      let scrapedData = null;
-      let attempts = 0;
-      const maxAttempts = 5;
-      
-      while (attempts < maxAttempts) {
-        try {
-          const fileContent = fs.readFileSync(latestFile, 'utf-8');
-          scrapedData = JSON.parse(fileContent);
-          break;
-        } catch (e) {
-          attempts++;
-          if (attempts >= maxAttempts) {
-            throw new Error(`Não foi possível ler o arquivo de dados após ${maxAttempts} tentativas: ${e.message}`);
-          }
-          console.log(`⏳ Aguardando arquivo ser salvo (tentativa ${attempts}/${maxAttempts})...`);
-          await this.page.waitForTimeout(2000);
+      // Usar match encontrado durante extração se disponível
+      if (extractionResult && extractionResult.bestMatch) {
+        bestPlan = {
+          nomeBem: extractionResult.bestMatch.nomeBem,
+          valor: extractionResult.bestMatch.valor,
+          prazo: extractionResult.bestMatch.prazo,
+          primeiraParcela: extractionResult.bestMatch.primeiraParcela,
+          plano: extractionResult.bestMatch.plano,
+          tipoVenda: extractionResult.bestMatch.tipoVenda,
+          rawData: extractionResult.bestMatch.rawData
+        };
+        
+        if (extractionResult.earlyTermination) {
+          console.log('⚡ Extração otimizada: parou cedo após encontrar match exato!');
+        } else {
+          console.log('✅ Melhor match encontrado durante extração');
         }
       }
+      
+      // Fallback: Se não encontrou durante extração, tentar buscar nos dados salvos
+      if (!bestPlan) {
+        console.log('⚠️  Plano não encontrado durante extração, verificando dados salvos...');
+        const dataDir = path.join(process.cwd(), 'data');
+        
+        if (fs.existsSync(dataDir)) {
+          const files = fs.readdirSync(dataDir)
+            .filter(f => f.startsWith('table-data-automoveis-all-pages-') && f.endsWith('.json'))
+            .sort()
+            .reverse();
 
-      // Encontrar melhor plano correspondente
-      console.log('🔍 Procurando melhor plano correspondente...');
-      const bestPlan = this.findBestMatchingPlan(scrapedData, data.valor, data.prazo);
+          if (files.length > 0) {
+            const latestFile = path.join(dataDir, files[0]);
+            try {
+              const fileContent = fs.readFileSync(latestFile, 'utf-8');
+              const scrapedData = JSON.parse(fileContent);
+              
+              // Verificar se há bestMatch salvo no arquivo
+              if (scrapedData.bestMatch) {
+                bestPlan = {
+                  nomeBem: scrapedData.bestMatch.nomeBem,
+                  valor: scrapedData.bestMatch.valor,
+                  prazo: scrapedData.bestMatch.prazo,
+                  primeiraParcela: scrapedData.bestMatch.primeiraParcela,
+                  plano: scrapedData.bestMatch.plano,
+                  tipoVenda: scrapedData.bestMatch.tipoVenda,
+                  rawData: scrapedData.bestMatch
+                };
+                console.log('✅ Usando match salvo do arquivo');
+              } else {
+                // Buscar manualmente nos dados
+                bestPlan = this.findBestMatchingPlan(scrapedData, data.valor, data.prazo);
+                if (bestPlan) {
+                  console.log('✅ Plano encontrado nos dados salvos');
+                }
+              }
+            } catch (e) {
+              console.warn('⚠️  Erro ao ler arquivo salvo:', e.message);
+            }
+          }
+        }
+      }
 
       if (!bestPlan) {
         // Se não encontrou plano exato, usar estimativa
@@ -2080,6 +2400,7 @@ class CanopusRPAService {
         adminFee: 15, // Taxa padrão
         details: `Plano: ${bestPlan.plano}\nTipo de Venda: ${bestPlan.tipoVenda}\nNome do Bem: ${bestPlan.nomeBem}`,
         timestamp: new Date().toISOString(),
+        optimized: extractionResult ? extractionResult.earlyTermination : false,
         customerData: {
           nome: data.nome,
           cpf: data.cpf,
@@ -2098,78 +2419,159 @@ class CanopusRPAService {
 
     } catch (error) {
       console.error('❌ Erro ao gerar cotação de automóvel:', error.message);
-      await this.screenshot('error-car-quotation');
       throw error;
     }
   }
 
   /**
-   * Gera cotação de consórcio de imóvel
+   * Gera cotação de consórcio de imóvel usando dados extraídos da tabela
    */
   async generatePropertyQuotation(data) {
     try {
       console.log('🏠 Gerando cotação de imóvel...');
+      console.log(`   Cliente: ${data.nome}`);
+      console.log(`   Valor desejado: R$ ${data.valor.toLocaleString('pt-BR')}`);
+      console.log(`   Prazo desejado: ${data.prazo} meses`);
       
       if (!this.isLoggedIn) {
         await this.login();
       }
 
-      // Navegar para página de cotação de imóvel
-      // IMPORTANTE: Ajustar URL e seletores conforme o site real
-      await this.navigateTo(`${config.canopus.url}/cotacao/imovel`);
-      await this.screenshot('07-property-quotation-page');
+      // Navegar para página de planos, selecionar IMOVEIS (sem IPCA), e extrair dados
+      console.log('📋 Acessando lista de planos (IMOVEIS)...');
+      await this.navigateToPlansListForImoveis();
 
-      // Preencher valor do imóvel
-      const valueSelector = 'input[name="valor"], input#valor, input[placeholder*="valor"]';
-      await this.page.waitForSelector(valueSelector, { timeout: 10000 });
-      await this.page.fill(valueSelector, data.valor.toString());
-      console.log(`✅ Valor preenchido: R$ ${data.valor}`);
-
-      // Selecionar prazo
-      const prazoSelector = 'select[name="prazo"], select#prazo';
-      await this.page.selectOption(prazoSelector, data.prazo.toString());
-      console.log(`✅ Prazo selecionado: ${data.prazo} meses`);
-
-      // Preencher dados pessoais
-      await this.page.fill('input[name="nome"], input#nome', data.nome);
-      await this.page.fill('input[name="cpf"], input#cpf', data.cpf);
-      await this.page.fill('input[name="dataNascimento"], input#dataNascimento', data.dataNascimento);
-      await this.page.fill('input[name="email"], input#email', data.email);
+      // OTIMIZAÇÃO: Chamar scrapeAndSaveGridData com parâmetros de busca
+      console.log('🔍 Buscando plano correspondente durante extração...');
+      let extractionResult = null;
+      let bestPlan = null;
       
-      console.log('✅ Dados pessoais preenchidos');
-
-      await this.screenshot('08-form-filled');
-
-      // Clicar em gerar cotação
-      const generateButtonSelector = 'button:has-text("Gerar"), button:has-text("Cotar"), button[type="submit"]';
-      await this.page.click(generateButtonSelector);
-      console.log('🔘 Botão de gerar cotação clicado');
-
-      // Aguardar resultado
       try {
-        await this.page.waitForLoadState('load', { timeout: 20000 });
+        extractionResult = await this.scrapeAndSaveGridData(data.valor, data.prazo, true, 'imoveis');
       } catch (error) {
-        // Se falhar, tentar domcontentloaded ou apenas aguardar
-        try {
-          await this.page.waitForLoadState('domcontentloaded', { timeout: 15000 });
-        } catch (e) {
-          // Continuar mesmo se não conseguir esperar
-          console.log('⚠️  Continuando sem esperar load state completo');
+        console.warn('⚠️  Erro durante extração otimizada, tentando método tradicional...', error.message);
+        extractionResult = null;
+      }
+      
+      // Usar match encontrado durante extração se disponível
+      if (extractionResult && extractionResult.bestMatch) {
+        bestPlan = {
+          nomeBem: extractionResult.bestMatch.nomeBem,
+          valor: extractionResult.bestMatch.valor,
+          prazo: extractionResult.bestMatch.prazo,
+          primeiraParcela: extractionResult.bestMatch.primeiraParcela,
+          plano: extractionResult.bestMatch.plano,
+          tipoVenda: extractionResult.bestMatch.tipoVenda,
+          rawData: extractionResult.bestMatch.rawData
+        };
+        
+        if (extractionResult.earlyTermination) {
+          console.log('⚡ Extração otimizada: parou cedo após encontrar match exato!');
+        } else {
+          console.log('✅ Melhor match encontrado durante extração');
         }
       }
-      await this.page.waitForTimeout(3000);
+      
+      // Fallback: Se não encontrou durante extração, tentar buscar nos dados salvos
+      if (!bestPlan) {
+        console.log('⚠️  Plano não encontrado durante extração, verificando dados salvos...');
+        const dataDir = path.join(process.cwd(), 'data');
+        
+        if (fs.existsSync(dataDir)) {
+          const files = fs.readdirSync(dataDir)
+            .filter(f => f.startsWith('table-data-imoveis-all-pages-') && f.endsWith('.json'))
+            .sort()
+            .reverse();
 
-      await this.screenshot('09-quotation-result');
+          if (files.length > 0) {
+            const latestFile = path.join(dataDir, files[0]);
+            try {
+              const fileContent = fs.readFileSync(latestFile, 'utf-8');
+              const scrapedData = JSON.parse(fileContent);
+              
+              // Verificar se há bestMatch salvo no arquivo
+              if (scrapedData.bestMatch) {
+                bestPlan = {
+                  nomeBem: scrapedData.bestMatch.nomeBem,
+                  valor: scrapedData.bestMatch.valor,
+                  prazo: scrapedData.bestMatch.prazo,
+                  primeiraParcela: scrapedData.bestMatch.primeiraParcela,
+                  plano: scrapedData.bestMatch.plano,
+                  tipoVenda: scrapedData.bestMatch.tipoVenda,
+                  rawData: scrapedData.bestMatch
+                };
+                console.log('✅ Usando match salvo do arquivo');
+              } else {
+                // Buscar manualmente nos dados
+                bestPlan = this.findBestMatchingPlan(scrapedData, data.valor, data.prazo);
+                if (bestPlan) {
+                  console.log('✅ Plano encontrado nos dados salvos');
+                }
+              }
+            } catch (e) {
+              console.warn('⚠️  Erro ao ler arquivo salvo:', e.message);
+            }
+          }
+        }
+      }
 
-      // Extrair dados da cotação
-      const quotationData = await this.extractQuotationData('IMOVEL', data.valor, data.prazo);
+      if (!bestPlan) {
+        // Se não encontrou plano exato, usar estimativa
+        console.log('⚠️  Plano exato não encontrado, usando estimativa...');
+        return {
+          type: 'Consórcio de Imóvel',
+          value: data.valor,
+          months: data.prazo,
+          monthlyPayment: this.calculateEstimatedPayment(data.valor, data.prazo),
+          adminFee: 18,
+          details: 'Cotação baseada em estimativa. Entre em contato para valores exatos.',
+          timestamp: new Date().toISOString(),
+          customerData: {
+            nome: data.nome,
+            cpf: data.cpf,
+            email: data.email
+          }
+        };
+      }
+
+      console.log('✅ Plano encontrado:');
+      console.log(`   Nome: ${bestPlan.nomeBem}`);
+      console.log(`   Valor: R$ ${bestPlan.valor.toLocaleString('pt-BR')}`);
+      console.log(`   Prazo: ${bestPlan.prazo} meses`);
+      console.log(`   1ª Parcela: R$ ${bestPlan.primeiraParcela.toLocaleString('pt-BR')}`);
+
+      // Calcular parcela mensal estimada (se não disponível)
+      const monthlyPayment = bestPlan.primeiraParcela || 
+        this.calculateEstimatedPayment(bestPlan.valor, bestPlan.prazo);
+
+      // Preparar dados da cotação
+      const quotationData = {
+        type: 'Consórcio de Imóvel',
+        value: bestPlan.valor,
+        months: bestPlan.prazo,
+        monthlyPayment: monthlyPayment,
+        adminFee: 18, // Taxa padrão para imóveis
+        details: `Plano: ${bestPlan.plano}\nTipo de Venda: ${bestPlan.tipoVenda}\nNome do Bem: ${bestPlan.nomeBem}`,
+        timestamp: new Date().toISOString(),
+        optimized: extractionResult ? extractionResult.earlyTermination : false,
+        customerData: {
+          nome: data.nome,
+          cpf: data.cpf,
+          email: data.email,
+          dataNascimento: data.dataNascimento
+        },
+        planDetails: {
+          nomeBem: bestPlan.nomeBem,
+          plano: bestPlan.plano,
+          tipoVenda: bestPlan.tipoVenda
+        }
+      };
       
       console.log('✅ Cotação de imóvel gerada com sucesso!');
       return quotationData;
 
     } catch (error) {
       console.error('❌ Erro ao gerar cotação de imóvel:', error.message);
-      await this.screenshot('error-property-quotation');
       throw error;
     }
   }
@@ -2241,30 +2643,6 @@ class CanopusRPAService {
     return total / months;
   }
 
-  /**
-   * Captura screenshot
-   */
-  async screenshot(name) {
-    try {
-      const screenshotsDir = path.join(process.cwd(), 'screenshots');
-      if (!fs.existsSync(screenshotsDir)) {
-        fs.mkdirSync(screenshotsDir, { recursive: true });
-      }
-
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const filename = `${name}-${timestamp}.png`;
-      const filepath = path.join(screenshotsDir, filename);
-
-      await this.page.screenshot({ 
-        path: filepath,
-        fullPage: true 
-      });
-      
-      console.log(`📸 Screenshot salvo: ${filename}`);
-    } catch (error) {
-      console.error('⚠️ Erro ao capturar screenshot:', error.message);
-    }
-  }
 
   /**
    * Fecha o navegador

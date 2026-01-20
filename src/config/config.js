@@ -32,23 +32,40 @@ export const config = {
   server: {
     port: process.env.PORT || 3000,
     nodeEnv: process.env.NODE_ENV || 'development'
-  }
+  },
+
+  // Quotation Mode
+  // 'scraping' = usa scraping em tempo real (modo original)
+  // 'pre-scraped' = usa dados previamente extraídos da pasta data/ (modo rápido)
+  quotationMode: process.env.QUOTATION_MODE || 'pre-scraped'
 };
 
 // Validate required configuration
 export function validateConfig() {
-  const required = [
-    'ZAPI_INSTANCE_ID',
-    'ZAPI_TOKEN',
+  const isFrontendMode = process.env.FRONTEND_MODE === 'true' || process.env.NODE_ENV === 'development';
+  
+  // Always required
+  const alwaysRequired = [
     'CANOPUS_URL',
     'CANOPUS_USERNAME',
     'CANOPUS_PASSWORD',
     'OPENAI_API_KEY'
   ];
 
+  // Required only when not in frontend mode
+  const whatsappRequired = isFrontendMode ? [] : [
+    'ZAPI_INSTANCE_ID',
+    'ZAPI_TOKEN'
+  ];
+
+  const required = [...alwaysRequired, ...whatsappRequired];
   const missing = required.filter(key => !process.env[key]);
 
   if (missing.length > 0) {
-    throw new Error(`Configurações obrigatórias faltando: ${missing.join(', ')}`);
+    if (isFrontendMode) {
+      console.warn(`⚠️  Configurações faltando (mas OK para modo frontend): ${missing.join(', ')}`);
+    } else {
+      throw new Error(`Configurações obrigatórias faltando: ${missing.join(', ')}`);
+    }
   }
 }

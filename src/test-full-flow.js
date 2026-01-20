@@ -90,7 +90,6 @@ async function testFullFlow() {
 
     console.log('\n✅ Teste do fluxo completo iniciado!');
     console.log('📊 Verifique os logs acima para acompanhar o progresso.');
-    console.log('📸 Screenshots serão salvos em ./screenshots/');
     console.log('💾 Dados extraídos serão salvos em ./data/\n');
 
     console.log('═'.repeat(60));

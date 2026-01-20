@@ -59,9 +59,6 @@ RUN npx playwright install-deps chromium
 # Copiar código da aplicação
 COPY . .
 
-# Criar diretório para screenshots
-RUN mkdir -p /app/screenshots
-
 # Expor porta
 EXPOSE 3000
 

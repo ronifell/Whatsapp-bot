@@ -87,7 +87,128 @@ NODE_ENV=production
 
 # Admin WhatsApp
 ADMIN_WHATSAPP=5511999999999
+
+# Quotation Mode
+# 'scraping' = usa scraping em tempo real (modo original, mais lento)
+# 'pre-scraped' = usa dados previamente extraídos da pasta data/ (modo rápido, recomendado)
+QUOTATION_MODE=pre-scraped
 ```
+
+## ⚡ Modos de Operação
+
+O sistema suporta dois modos de geração de cotações:
+
+### Modo Pre-Scraped (Recomendado - Rápido) ⚡
+
+**Configuração**: `QUOTATION_MODE=pre-scraped`
+
+Este modo usa dados previamente extraídos armazenados na pasta `data/`. É muito mais rápido pois não precisa acessar o website em tempo real.
+
+**Como funciona:**
+1. O sistema lê os arquivos JSON mais recentes da pasta `data/`
+2. Busca o plano mais adequado baseado no valor e prazo solicitado pelo cliente
+3. Retorna a cotação instantaneamente
+
+**Vantagens:**
+- ⚡ Resposta muito mais rápida (segundos vs minutos)
+- 💰 Não consome recursos do servidor Canopus
+- 🔄 Funciona mesmo se o site estiver temporariamente indisponível
+
+**Requisitos:**
+- Arquivos JSON na pasta `data/` com dados previamente extraídos
+- Arquivos devem seguir o padrão:
+  - `table-data-automoveis-all-pages-*.json` (para cotações de carro)
+  - `table-data-imoveis-all-pages-*.json` (para cotações de imóvel)
+
+**Para atualizar os dados:**
+Execute o scraping uma vez para gerar os arquivos JSON na pasta `data/`:
+```bash
+# Execute o scraping normalmente (modo scraping)
+QUOTATION_MODE=scraping npm start
+# Ou use o script de teste RPA
+npm run test:rpa
+```
+
+### Modo Scraping (Original - Completo) 🕷️
+
+**Configuração**: `QUOTATION_MODE=scraping`
+
+Este é o modo original que acessa o website Canopus em tempo real para gerar cotações.
+
+**Como funciona:**
+1. Abre navegador automatizado
+2. Faz login no portal Canopus
+3. Navega até a página de planos
+4. Extrai dados em tempo real
+5. Encontra o melhor plano
+6. Retorna a cotação
+
+**Vantagens:**
+- 📊 Dados sempre atualizados
+- 🔍 Busca em tempo real
+- ✅ Garante dados mais recentes
+
+**Desvantagens:**
+- ⏱️ Mais lento (pode levar minutos)
+- 💻 Consome mais recursos
+- 🌐 Depende da disponibilidade do site
+
+**Quando usar:**
+- Quando você precisa de dados atualizados
+- Para gerar/atualizar os arquivos JSON na pasta `data/`
+- Para testes e validação
+
+### Como Alternar Entre Modos
+
+Para alternar entre os modos, simplesmente altere a variável `QUOTATION_MODE` no arquivo `.env`:
+
+```bash
+# Modo rápido (pre-scraped)
+QUOTATION_MODE=pre-scraped
+
+# Modo completo (scraping)
+QUOTATION_MODE=scraping
+```
+
+Depois de alterar, reinicie o servidor:
+```bash
+npm start
+```
+
+## 💻 Frontend de Teste (WhatsApp Simulado)
+
+Um frontend Next.js está disponível para testar o sistema sem precisar do WhatsApp real.
+
+### Características:
+- Interface similar ao WhatsApp
+- Mensagens em tempo real via Server-Sent Events
+- Respostas automáticas do bot
+- Geração de cotações quando solicitado
+
+### Como usar o frontend:
+
+1. **Inicie o backend** (na raiz do projeto):
+```bash
+npm start
+```
+
+2. **Em outro terminal, inicie o frontend**:
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+3. **Acesse no navegador**: http://localhost:3001
+
+4. **Teste enviando mensagens**, como:
+   - "Quero cotar um carro de 50 mil"
+   - "Preciso de uma cotação de imóvel"
+   - Informações completas de uma vez
+
+O frontend está conectado ao mesmo backend que o WhatsApp real. Para usar com WhatsApp real, simplesmente remova o frontend ou defina `FRONTEND_MODE=false` no `.env`.
+
+**Veja mais detalhes em**: [frontend/README.md](frontend/README.md)
 
 ## 🧪 Testes
 
@@ -338,12 +459,21 @@ cotafacil-automacao/
 │   │   └── config.js              # Configurações centralizadas
 │   ├── services/
 │   │   ├── ai.service.js          # Serviço de IA (OpenAI)
-│   │   ├── canopus-rpa.service.js # RPA do portal Canopus
+│   │   ├── canopus-rpa.service.js # RPA do portal Canopus (modo scraping)
+│   │   ├── pre-scraped-data.service.js # Serviço de dados pre-scraped (modo rápido)
+│   │   ├── message-bus.service.js # Message bus (frontend-backend)
 │   │   ├── orchestrator.service.js # Orquestração do fluxo
 │   │   ├── session.service.js     # Gerenciamento de sessões
 │   │   └── whatsapp.service.js    # Integração Z-API
 │   ├── index.js                   # Servidor principal
 │   └── test-rpa.js                # Script de teste RPA
+├── data/                           # Dados previamente extraídos (JSON)
+│   ├── table-data-automoveis-all-pages-*.json
+│   └── table-data-imoveis-all-pages-*.json
+├── frontend/                       # Frontend Next.js (teste)
+│   ├── app/                        # Next.js App Router
+│   ├── components/                 # Componentes React
+│   └── package.json
 ├── screenshots/                    # Screenshots do RPA
 ├── .gitignore
 ├── env.example                    # Exemplo de configuração

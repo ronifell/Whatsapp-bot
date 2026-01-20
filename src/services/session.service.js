@@ -14,7 +14,7 @@ class SessionService {
   createSession(phone, data = {}) {
     const session = {
       phone: phone,
-      state: 'INITIAL', // INITIAL, AWAITING_TYPE, AWAITING_DATA, PROCESSING, COMPLETED
+      state: 'INITIAL', // INITIAL, CONVERSATIONAL, AWAITING_TYPE, AWAITING_DATA, PROCESSING, COMPLETED, FORWARDED_TO_HUMAN
       consortiumType: null,
       data: {},
       history: [],

@@ -115,30 +115,9 @@ Se alguma informação não estiver presente, use null.`;
       };
     }
 
-    // Validações específicas
-    if (data.valor < 1000) {
-      return { valid: false, error: 'Valor do bem muito baixo' };
-    }
-
-    if (consortiumType === 'CARRO') {
-      const validPrazos = [24, 36, 48, 60, 72, 80];
-      if (!validPrazos.includes(data.prazo)) {
-        return { 
-          valid: false, 
-          error: `Prazo inválido para automóvel. Prazos válidos: ${validPrazos.join(', ')} meses` 
-        };
-      }
-    }
-
-    if (consortiumType === 'IMOVEL') {
-      const validPrazos = [80, 100, 120, 150, 180, 200];
-      if (!validPrazos.includes(data.prazo)) {
-        return { 
-          valid: false, 
-          error: `Prazo inválido para imóvel. Prazos válidos: ${validPrazos.join(', ')} meses` 
-        };
-      }
-    }
+    // Validações básicas - removidas restrições de valor/prazo
+    // O sistema sempre encontrará o plano mais próximo disponível
+    // Apenas validações de formato são mantidas abaixo
 
     // Validação de CPF (básica)
     if (!/^\d{11}$/.test(data.cpf.replace(/\D/g, ''))) {
@@ -195,6 +174,116 @@ Por favor, envie essas informações.`;
 
     const messageLower = message.toLowerCase();
     return closingKeywords.some(keyword => messageLower.includes(keyword));
+  }
+
+  /**
+   * Detecta a intenção principal do usuário
+   * Retorna: 'QUESTION', 'QUOTE_REQUEST', 'HUMAN_REQUEST', ou 'OTHER'
+   */
+  async detectUserIntent(message, conversationHistory = []) {
+    try {
+      const historyContext = conversationHistory.length > 0
+        ? conversationHistory.slice(-5).map(msg => `${msg.type === 'user' ? 'Cliente' : 'Bot'}: ${msg.message}`).join('\n')
+        : 'Nenhuma conversa anterior.';
+
+      const prompt = `Você é um assistente que detecta a intenção do cliente em conversas sobre consórcio.
+
+Histórico da conversa (últimas mensagens):
+${historyContext}
+
+Mensagem atual do cliente: "${message}"
+
+Analise a mensagem e determine a intenção principal:
+- QUESTION: Cliente está fazendo uma pergunta, querendo informações, esclarecimentos sobre consórcio, produtos, processos, etc. Exemplos: "O que é consórcio?", "Como funciona?", "Quais são as taxas?", "Qual a diferença entre consórcio de carro e imóvel?"
+- QUOTE_REQUEST: Cliente está explicitamente solicitando uma cotação, pedindo para fazer uma cotação, querendo valores, querendo cotar. Exemplos: "Quero cotar um carro", "Fazer uma cotação", "Preciso de uma cotação de imóvel", "Quanto custa para X valor em Y meses"
+- HUMAN_REQUEST: Cliente quer falar com um humano, atendente, consultor. Exemplos: "Quero falar com alguém", "Atendimento humano", "Consultor", "Falar com atendente"
+- OTHER: Outras intenções não categorizadas
+
+IMPORTANTE: 
+- Perguntas sobre consórcio devem ser classificadas como QUESTION, mesmo que mencionem tipos específicos
+- Apenas solicitações explícitas de cotação devem ser QUOTE_REQUEST
+- Se a mensagem for uma pergunta informativa, SEMPRE classifique como QUESTION
+
+Responda APENAS com uma das palavras: QUESTION, QUOTE_REQUEST, HUMAN_REQUEST, ou OTHER`;
+
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: 'Você é um assistente especializado em detectar intenções de clientes.' },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.3,
+        max_tokens: 20
+      });
+
+      const intent = response.choices[0].message.content.trim().toUpperCase();
+      console.log(`🤖 Intenção detectada: ${intent}`);
+      
+      return intent;
+    } catch (error) {
+      console.error('❌ Erro na detecção de intenção:', error.message);
+      return 'OTHER';
+    }
+  }
+
+  /**
+   * Gera resposta conversacional baseada no contexto e pergunta do cliente
+   */
+  async generateConversationalResponse(message, conversationHistory = [], consortiumType = null) {
+    try {
+      const historyContext = conversationHistory.length > 0
+        ? conversationHistory.slice(-10).map(msg => `${msg.type === 'user' ? 'Cliente' : 'Você'}: ${msg.message}`).join('\n')
+        : 'Nenhuma conversa anterior.';
+
+      const contextInfo = consortiumType 
+        ? `\nContexto: O cliente mencionou interesse em consórcio de ${consortiumType === 'CARRO' ? 'automóvel' : 'imóvel'}, mas ainda não solicitou cotação explicitamente.`
+        : '';
+
+      const prompt = `Você é um assistente virtual especializado em consórcio para a empresa CotaFácil Alphaville.
+
+Sua função é:
+- Responder perguntas sobre consórcio de forma natural e conversacional
+- Explicar conceitos de forma clara e didática
+- Ser amigável, profissional e útil
+- Variar suas respostas naturalmente (como em uma conversa humana real)
+- NÃO oferecer cotações a menos que explicitamente solicitado pelo cliente
+- NÃO assumir que o cliente quer cotar quando ele está apenas perguntando
+
+Histórico da conversa:
+${historyContext}
+${contextInfo}
+
+Mensagem do cliente: "${message}"
+
+Gere uma resposta natural, conversacional e útil. A resposta deve:
+- Ser específica à pergunta do cliente
+- Ser informativa e clara
+- Variar no estilo (não sempre igual)
+- Se apropriado, mencionar que você pode ajudar com cotações quando o cliente quiser, mas sem pressionar
+
+Resposta (em português brasileiro):`;
+
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          { 
+            role: 'system', 
+            content: 'Você é um assistente virtual especializado em consórcio, conversacional e amigável. Você responde perguntas sobre consórcio de forma natural e variada, como um humano faria.' 
+          },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.8, // Higher temperature for more diverse responses
+        max_tokens: 500
+      });
+
+      const conversationalResponse = response.choices[0].message.content.trim();
+      console.log('🤖 Resposta conversacional gerada');
+      
+      return conversationalResponse;
+    } catch (error) {
+      console.error('❌ Erro ao gerar resposta conversacional:', error.message);
+      return 'Desculpe, não consegui processar sua mensagem. Poderia reformular sua pergunta?';
+    }
   }
 }
 
