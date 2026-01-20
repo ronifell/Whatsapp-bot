@@ -179,6 +179,32 @@ Por favor, envie essas informações.`;
   }
 
   /**
+   * Detecta se o usuário confirmou ou negou uma ação (ex: conectar ao consultor)
+   * Retorna: 'yes', 'no', ou null se não detectado
+   */
+  detectConfirmation(message) {
+    const messageLower = message.toLowerCase().trim();
+    
+    // Palavras de confirmação
+    const yesKeywords = ['sim', 'yes', 's', 'y', 'ok', 'okay', 'confirmo', 'confirm', 'aceito', 'aceitar', 'quero', 'gostaria', 'prosseguir', 'continuar'];
+    
+    // Palavras de negação
+    const noKeywords = ['não', 'nao', 'no', 'n', 'não quero', 'nao quero', "don't", "dont", 'cancelar', 'cancel', 'voltar', 'não obrigado', 'nao obrigado'];
+    
+    // Verificar confirmação
+    if (yesKeywords.some(keyword => messageLower === keyword || messageLower.startsWith(keyword + ' ') || messageLower.endsWith(' ' + keyword))) {
+      return 'yes';
+    }
+    
+    // Verificar negação
+    if (noKeywords.some(keyword => messageLower === keyword || messageLower.startsWith(keyword + ' ') || messageLower.endsWith(' ' + keyword))) {
+      return 'no';
+    }
+    
+    return null;
+  }
+
+  /**
    * Detecta a intenção principal do usuário
    * Retorna: 'QUESTION', 'QUOTE_REQUEST', 'HUMAN_REQUEST', ou 'OTHER'
    */

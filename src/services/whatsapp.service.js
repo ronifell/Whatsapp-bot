@@ -325,6 +325,45 @@ Precisa de ajuda? Digite: *AJUDA*`;
   /**
    * Encaminha para atendimento humano
    */
+  /**
+   * Envia mensagem de confirmação antes de conectar ao consultor
+   */
+  async sendHumanConfirmationMessage(phone, preferredLanguage = 'pt') {
+    const message = preferredLanguage === 'en'
+      ? `👨‍💼 *Connect to a Counselor?*
+
+Would you like to be connected to one of our specialized counselors?
+
+They can help you with:
+• Detailed consultations
+• Complex questions
+• Closing your deal
+• Personalized assistance
+
+Please reply with:
+• *YES* or *SIM* to connect
+• *NO* or *NÃO* to continue with the bot
+
+How would you like to proceed?`
+      : `👨‍💼 *Conectar com um Consultor?*
+
+Gostaria de ser conectado a um de nossos consultores especializados?
+
+Eles podem ajudá-lo com:
+• Consultorias detalhadas
+• Dúvidas complexas
+• Fechamento do seu negócio
+• Atendimento personalizado
+
+Por favor, responda com:
+• *SIM* para conectar
+• *NÃO* para continuar com o bot
+
+Como deseja prosseguir?`;
+
+    return this.sendMessage(phone, message);
+  }
+
   async forwardToHuman(phone, reason, customerData) {
     const adminNumber = config.whatsapp.adminNumber;
     

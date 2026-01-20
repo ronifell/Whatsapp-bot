@@ -78,6 +78,10 @@ class OrchestratorService {
           await this.handlePostQuotation(phone, message, session);
           break;
 
+        case 'AWAITING_HUMAN_CONFIRMATION':
+          await this.handleHumanConfirmation(phone, message, session);
+          break;
+
         case 'FORWARDED_TO_HUMAN':
           // Não deve chegar aqui devido ao check acima, mas por segurança
           console.log(`🔇 Mensagem de ${phone} ignorada - cliente já está com atendente humano`);
@@ -119,6 +123,91 @@ class OrchestratorService {
   }
 
   /**
+   * Solicita confirmação antes de conectar ao consultor
+   */
+  async requestHumanConfirmation(phone, reason, customerData, session) {
+    const preferredLanguage = session.preferredLanguage || 'pt';
+    
+    // Armazenar dados da solicitação para usar após confirmação
+    sessionService.updateSession(phone, {
+      state: 'AWAITING_HUMAN_CONFIRMATION',
+      pendingHumanForward: {
+        reason: reason,
+        customerData: customerData
+      }
+    });
+    
+    // Enviar mensagem de confirmação
+    await whatsappService.sendHumanConfirmationMessage(phone, preferredLanguage);
+    sessionService.addToHistory(phone, 
+      preferredLanguage === 'en' 
+        ? 'Would you like to be connected to one of our specialized counselors?'
+        : 'Gostaria de ser conectado a um de nossos consultores especializados?',
+      'bot'
+    );
+  }
+
+  /**
+   * Trata resposta de confirmação para conectar ao consultor
+   */
+  async handleHumanConfirmation(phone, message, session) {
+    const confirmation = aiService.detectConfirmation(message);
+    const preferredLanguage = session.preferredLanguage || 'pt';
+    
+    if (confirmation === 'yes') {
+      // Cliente confirmou - conectar ao consultor
+      const pendingForward = session.pendingHumanForward;
+      
+      if (pendingForward) {
+        await whatsappService.forwardToHuman(phone, pendingForward.reason, pendingForward.customerData);
+        sessionService.updateSession(phone, {
+          state: 'FORWARDED_TO_HUMAN',
+          pendingHumanForward: null
+        });
+        
+        const confirmMsg = preferredLanguage === 'en'
+          ? '✅ Connecting you to a counselor now...'
+          : '✅ Conectando você a um consultor agora...';
+        sessionService.addToHistory(phone, confirmMsg, 'bot');
+      } else {
+        // Dados não encontrados - tratar como erro
+        console.error('⚠️  Dados de encaminhamento não encontrados na sessão');
+        const errorMsg = preferredLanguage === 'en'
+          ? 'Sorry, there was an error. How can I help you?'
+          : 'Desculpe, ocorreu um erro. Como posso ajudá-lo?';
+        await whatsappService.sendMessage(phone, errorMsg);
+        sessionService.addToHistory(phone, errorMsg, 'bot');
+        sessionService.updateSession(phone, {
+          state: 'COMPLETED',
+          pendingHumanForward: null
+        });
+      }
+    } else if (confirmation === 'no') {
+      // Cliente negou - continuar com o bot
+      const continueMsg = preferredLanguage === 'en'
+        ? 'No problem! I\'m here to help. How can I assist you?'
+        : 'Sem problema! Estou aqui para ajudar. Como posso ajudá-lo?';
+      await whatsappService.sendMessage(phone, continueMsg);
+      sessionService.addToHistory(phone, continueMsg, 'bot');
+      
+      // Voltar ao estado anterior ou estado conversacional
+      const previousState = session.consortiumType ? 'COMPLETED' : 'CONVERSATIONAL';
+      sessionService.updateSession(phone, {
+        state: previousState,
+        pendingHumanForward: null
+      });
+    } else {
+      // Resposta não clara - pedir esclarecimento
+      const clarificationMsg = preferredLanguage === 'en'
+        ? '🤔 I didn\'t understand your response.\n\nPlease reply with:\n• *YES* or *SIM* to connect to a counselor\n• *NO* or *NÃO* to continue with the bot'
+        : '🤔 Não entendi sua resposta.\n\nPor favor, responda com:\n• *SIM* para conectar com um consultor\n• *NÃO* para continuar com o bot';
+      await whatsappService.sendMessage(phone, clarificationMsg);
+      sessionService.addToHistory(phone, clarificationMsg, 'bot');
+      // Manter estado AWAITING_HUMAN_CONFIRMATION
+    }
+  }
+
+  /**
    * Trata estado inicial - detecta intenção e responde apropriadamente
    */
   async handleInitialState(phone, message, session) {
@@ -126,14 +215,10 @@ class OrchestratorService {
     const intent = await aiService.detectUserIntent(message, session.history || []);
 
     if (intent === 'HUMAN_REQUEST') {
-      // Cliente quer falar com humano - encaminhar
-      await whatsappService.forwardToHuman(phone, 'Cliente solicitou atendimento humano', {
+      // Cliente quer falar com humano - solicitar confirmação
+      await this.requestHumanConfirmation(phone, 'Cliente solicitou atendimento humano', {
         message: message
-      });
-      
-      sessionService.updateSession(phone, { 
-        state: 'FORWARDED_TO_HUMAN'
-      });
+      }, session);
       return;
     }
 
@@ -142,16 +227,11 @@ class OrchestratorService {
       const classification = await aiService.classifyConsortiumType(message);
       
       if (classification === 'OUTROS') {
-        // Cotação para outros tipos - encaminhar para humano
-        await whatsappService.forwardToHuman(phone, 'Solicitação de cotação para tipo não automatizado', {
+        // Cotação para outros tipos - solicitar confirmação para conectar ao humano
+        await this.requestHumanConfirmation(phone, 'Solicitação de cotação para tipo não automatizado', {
           message: message,
           consortiumType: classification
-        });
-        
-        sessionService.updateSession(phone, { 
-          state: 'FORWARDED_TO_HUMAN',
-          consortiumType: 'OUTROS'
-        });
+        }, session);
         return;
       }
 
@@ -237,15 +317,11 @@ class OrchestratorService {
     const intent = await aiService.detectUserIntent(message, session.history || []);
 
     if (intent === 'HUMAN_REQUEST') {
-      // Cliente quer falar com humano
-      await whatsappService.forwardToHuman(phone, 'Cliente solicitou atendimento humano', {
+      // Cliente quer falar com humano - solicitar confirmação
+      await this.requestHumanConfirmation(phone, 'Cliente solicitou atendimento humano', {
         message: message,
         conversationHistory: session.history
-      });
-      
-      sessionService.updateSession(phone, { 
-        state: 'FORWARDED_TO_HUMAN'
-      });
+      }, session);
       return;
     }
 
@@ -254,16 +330,11 @@ class OrchestratorService {
       const classification = await aiService.classifyConsortiumType(message);
       
       if (classification === 'OUTROS') {
-        // Cotação para outros tipos - encaminhar para humano
-        await whatsappService.forwardToHuman(phone, 'Solicitação de cotação para tipo não automatizado', {
+        // Cotação para outros tipos - solicitar confirmação para conectar ao humano
+        await this.requestHumanConfirmation(phone, 'Solicitação de cotação para tipo não automatizado', {
           message: message,
           consortiumType: classification
-        });
-        
-        sessionService.updateSession(phone, { 
-          state: 'FORWARDED_TO_HUMAN',
-          consortiumType: 'OUTROS'
-        });
+        }, session);
         return;
       }
 
@@ -331,13 +402,10 @@ class OrchestratorService {
     const intent = await aiService.detectUserIntent(message, session.history || []);
 
     if (intent === 'HUMAN_REQUEST') {
-      await whatsappService.forwardToHuman(phone, 'Cliente solicitou atendimento humano', {
+      // Cliente quer falar com humano - solicitar confirmação
+      await this.requestHumanConfirmation(phone, 'Cliente solicitou atendimento humano', {
         message: message
-      });
-      
-      sessionService.updateSession(phone, { 
-        state: 'FORWARDED_TO_HUMAN'
-      });
+      }, session);
       return;
     }
 
@@ -363,15 +431,10 @@ class OrchestratorService {
         return;
       }
 
-      // Se for solicitação explícita de cotação de outros tipos, encaminhar para humano
-      await whatsappService.forwardToHuman(phone, 'Consultoria/Outros', {
+      // Se for solicitação explícita de cotação de outros tipos, solicitar confirmação
+      await this.requestHumanConfirmation(phone, 'Consultoria/Outros', {
         message: message
-      });
-      
-      sessionService.updateSession(phone, { 
-        state: 'FORWARDED_TO_HUMAN',
-        consortiumType: 'OUTROS'
-      });
+      }, session);
       
       return;
     }
@@ -420,26 +483,22 @@ class OrchestratorService {
     const intent = await aiService.detectUserIntent(message, session.history || []);
     
     if (intent === 'HUMAN_REQUEST') {
-      await whatsappService.forwardToHuman(phone, 'Cliente solicitou atendimento humano durante coleta de dados', {
+      // Cliente quer falar com humano - solicitar confirmação
+      await this.requestHumanConfirmation(phone, 'Cliente solicitou atendimento humano durante coleta de dados', {
         message: message,
         consortiumType: session.consortiumType
-      });
-      sessionService.updateSession(phone, { 
-        state: 'FORWARDED_TO_HUMAN'
-      });
+      }, session);
       return;
     }
 
     // Verificar se quer fechar negócio
     const wantsToClose = await aiService.detectClosingIntent(message);
     if (wantsToClose) {
-      await whatsappService.forwardToHuman(phone, 'Cliente quer prosseguir com fechamento', {
+      // Cliente quer fechar negócio - solicitar confirmação para conectar ao consultor
+      await this.requestHumanConfirmation(phone, 'Cliente quer prosseguir com fechamento', {
         message: message,
         consortiumType: session.consortiumType
-      });
-      sessionService.updateSession(phone, { 
-        state: 'FORWARDED_TO_HUMAN'
-      });
+      }, session);
       return;
     }
 
@@ -603,21 +662,18 @@ class OrchestratorService {
       // Tentar classificar e extrair dados
       const classification = await aiService.classifyConsortiumType(message);
       
-      // Se for OUTROS (moto, etc.), encaminhar para humano
+      // Se for OUTROS (moto, etc.), solicitar confirmação para conectar ao humano
       if (classification === 'OUTROS') {
-        await whatsappService.forwardToHuman(
+        await this.requestHumanConfirmation(
           phone, 
           'Solicitação de cotação para tipo não automatizado',
           {
             message: message,
             consortiumType: classification,
             previousQuotation: session.quotation
-          }
+          },
+          session
         );
-        sessionService.updateSession(phone, { 
-          state: 'FORWARDED_TO_HUMAN',
-          consortiumType: 'OUTROS'
-        });
         return;
       }
       
@@ -699,19 +755,17 @@ class OrchestratorService {
     const intent = await aiService.detectUserIntent(message, session.history || []);
 
     if (intent === 'HUMAN_REQUEST') {
-      // Cliente explicitamente quer falar com humano
-      await whatsappService.forwardToHuman(
+      // Cliente explicitamente quer falar com humano - solicitar confirmação
+      await this.requestHumanConfirmation(
         phone, 
         'Cliente solicitou atendimento humano pós-cotação',
         {
           quotation: session.quotation,
           customerData: session.data,
           message: message
-        }
+        },
+        session
       );
-      sessionService.updateSession(phone, { 
-        state: 'FORWARDED_TO_HUMAN'
-      });
       return;
     }
 
@@ -719,21 +773,18 @@ class OrchestratorService {
       // Cliente quer outra cotação - verificar tipo e processar
       const classification = await aiService.classifyConsortiumType(message);
       
-      // Se for OUTROS (moto, etc.), encaminhar para humano
+      // Se for OUTROS (moto, etc.), solicitar confirmação para conectar ao humano
       if (classification === 'OUTROS') {
-        await whatsappService.forwardToHuman(
+        await this.requestHumanConfirmation(
           phone, 
           'Solicitação de cotação para tipo não automatizado',
           {
             message: message,
             consortiumType: classification,
             previousQuotation: session.quotation
-          }
+          },
+          session
         );
-        sessionService.updateSession(phone, { 
-          state: 'FORWARDED_TO_HUMAN',
-          consortiumType: 'OUTROS'
-        });
         return;
       }
       
@@ -816,20 +867,18 @@ class OrchestratorService {
         state: 'COMPLETED'
       });
       
-      // Se mencionar fechar negócio, encaminhar
+      // Se mencionar fechar negócio, solicitar confirmação para conectar ao consultor
       const wantsToClose = await aiService.detectClosingIntent(message);
       if (wantsToClose) {
-        await whatsappService.forwardToHuman(
+        await this.requestHumanConfirmation(
           phone, 
           'Cliente quer prosseguir com fechamento',
           {
             quotation: session.quotation,
             customerData: session.data
-          }
+          },
+          session
         );
-        sessionService.updateSession(phone, { 
-          state: 'FORWARDED_TO_HUMAN'
-        });
       }
       return;
     }

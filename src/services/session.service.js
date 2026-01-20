@@ -14,11 +14,12 @@ class SessionService {
   createSession(phone, data = {}) {
     const session = {
       phone: phone,
-      state: 'INITIAL', // INITIAL, CONVERSATIONAL, AWAITING_TYPE, AWAITING_DATA, PROCESSING, COMPLETED, FORWARDED_TO_HUMAN
+      state: 'INITIAL', // INITIAL, CONVERSATIONAL, AWAITING_TYPE, AWAITING_DATA, PROCESSING, COMPLETED, AWAITING_HUMAN_CONFIRMATION, FORWARDED_TO_HUMAN
       consortiumType: null,
       data: {},
       history: [],
       preferredLanguage: 'pt', // 'pt' for Portuguese, 'en' for English
+      pendingHumanForward: null, // Stores { reason, customerData } when awaiting confirmation
       createdAt: new Date(),
       updatedAt: new Date(),
       ...data
