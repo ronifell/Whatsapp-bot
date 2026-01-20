@@ -18,6 +18,7 @@ class SessionService {
       consortiumType: null,
       data: {},
       history: [],
+      preferredLanguage: 'pt', // 'pt' for Portuguese, 'en' for English
       createdAt: new Date(),
       updatedAt: new Date(),
       ...data

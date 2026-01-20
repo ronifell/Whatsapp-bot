@@ -220,15 +220,23 @@ Como posso te ajudar hoje? 😊`;
   }
 
   /**
-   * Solicita dados do cliente para automóvel
+   * Solicita dados do cliente para automóvel/veículo
+   * @param {string} phone - Número do telefone
+   * @param {string} originalMessage - Mensagem original do cliente (opcional, para detectar tipo específico)
    */
-  async requestCarData(phone) {
-    const message = `🚗 *Consórcio de Automóvel*
+  async requestCarData(phone, originalMessage = '') {
+    // Detectar se é moto ou carro baseado na mensagem original
+    const isMotorcycle = originalMessage && /moto|motorcycle|motocicleta/i.test(originalMessage);
+    const vehicleType = isMotorcycle ? 'Moto' : 'Veículo';
+    const emoji = isMotorcycle ? '🏍️' : '🚗';
+    const consortiumType = isMotorcycle ? 'Consórcio de Moto' : 'Consórcio de Automóvel';
+    
+    const message = `${emoji} *${consortiumType}*
 
 Para gerar sua cotação, preciso das seguintes informações:
 
-1. *Valor do veículo* (em R$)
-2. *Prazo desejado* (em meses: 24, 36, 48, 60, 72, 80)
+1. *Valor do ${vehicleType.toLowerCase()}* (em R$)
+2. *Prazo desejado* (em meses)
 3. *Nome completo*
 4. *CPF*
 5. *Data de nascimento*

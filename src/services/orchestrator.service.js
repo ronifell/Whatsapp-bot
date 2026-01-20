@@ -27,6 +27,14 @@ class OrchestratorService {
       // Adicionar ao histórico
       sessionService.addToHistory(phone, message, 'user');
 
+      // Detectar e atualizar preferência de idioma
+      const languagePreference = await aiService.detectLanguagePreference(message, session.history || []);
+      if (languagePreference) {
+        sessionService.updateSession(phone, { preferredLanguage: languagePreference });
+        session = sessionService.getSession(phone); // Atualizar referência da sessão
+        console.log(`🌐 Preferência de idioma atualizada para: ${languagePreference}`);
+      }
+
       // Verificar comando MENU
       if (message.toUpperCase().includes('MENU')) {
         sessionService.clearSession(phone);
@@ -81,17 +89,32 @@ class OrchestratorService {
 
     } catch (error) {
       console.error('❌ Erro ao processar mensagem:', error);
-      await whatsappService.sendErrorMessage(phone);
       
-      // Notificar admin sobre erro
-      await whatsappService.forwardToHuman(phone, 'Erro no processamento', {
-        error: error.message,
-        message: message
-      });
+      // Tentar responder conversacionalmente ao invés de encaminhar imediatamente
+      try {
+        const currentSession = sessionService.getSession(phone);
+        const preferredLanguage = currentSession?.preferredLanguage || 'pt';
+        const errorMessage = preferredLanguage === 'en'
+          ? 'An error occurred. How can I help?'
+          : 'Ocorreu um erro. Como posso ajudar?';
+        const response = await aiService.generateConversationalResponse(
+          errorMessage,
+          currentSession?.history || [],
+          currentSession?.consortiumType,
+          preferredLanguage
+        );
+        await whatsappService.sendMessage(phone, response);
+        if (currentSession) {
+          sessionService.addToHistory(phone, response, 'bot');
+        }
+      } catch (e) {
+        // Se falhar, enviar mensagem de erro genérica
+        await whatsappService.sendErrorMessage(phone);
+      }
       
-      sessionService.updateSession(phone, { 
-        state: 'FORWARDED_TO_HUMAN'
-      });
+      // Apenas notificar admin sobre erro crítico, mas não encaminhar cliente automaticamente
+      // O cliente pode tentar novamente ou pedir ajuda explicitamente
+      console.error('⚠️  Erro no processamento - cliente pode tentar novamente ou pedir ajuda');
     }
   }
 
@@ -159,11 +182,12 @@ class OrchestratorService {
         // Tem tipo mas falta dados - solicitar dados
         sessionService.updateSession(phone, {
           consortiumType: classification,
-          state: 'AWAITING_DATA'
+          state: 'AWAITING_DATA',
+          originalMessage: message // Salvar mensagem original para contexto
         });
 
         if (classification === 'CARRO') {
-          await whatsappService.requestCarData(phone);
+          await whatsappService.requestCarData(phone, message);
         } else if (classification === 'IMOVEL') {
           await whatsappService.requestPropertyData(phone);
         }
@@ -177,11 +201,15 @@ class OrchestratorService {
       const classification = await aiService.classifyConsortiumType(message);
       const consortiumType = (classification && classification !== 'OUTROS') ? classification : null;
       
+      // Obter preferência de idioma da sessão
+      const preferredLanguage = session.preferredLanguage || 'pt';
+      
       // Gerar resposta conversacional
       const response = await aiService.generateConversationalResponse(
         message, 
         session.history || [], 
-        consortiumType
+        consortiumType,
+        preferredLanguage
       );
       
       // Enviar resposta
@@ -264,11 +292,12 @@ class OrchestratorService {
         // Falta dados - solicitar
         sessionService.updateSession(phone, {
           consortiumType: classification,
-          state: 'AWAITING_DATA'
+          state: 'AWAITING_DATA',
+          originalMessage: message // Salvar mensagem original para contexto
         });
 
         if (classification === 'CARRO') {
-          await whatsappService.requestCarData(phone);
+          await whatsappService.requestCarData(phone, message);
         } else if (classification === 'IMOVEL') {
           await whatsappService.requestPropertyData(phone);
         }
@@ -277,10 +306,12 @@ class OrchestratorService {
     }
 
     // QUESTION ou OTHER - continuar conversação
+    const preferredLanguage = session.preferredLanguage || 'pt';
     const response = await aiService.generateConversationalResponse(
       message, 
       session.history || [], 
-      session.consortiumType
+      session.consortiumType,
+      preferredLanguage
     );
     
     await whatsappService.sendMessage(phone, response);
@@ -316,10 +347,12 @@ class OrchestratorService {
     if (classification === 'OUTROS') {
       // Se for pergunta sobre outros tipos, responder conversacionalmente
       if (intent === 'QUESTION' || intent === 'OTHER') {
+        const preferredLanguage = session.preferredLanguage || 'pt';
         const response = await aiService.generateConversationalResponse(
           message, 
           session.history || [], 
-          null
+          null,
+          preferredLanguage
         );
         
         await whatsappService.sendMessage(phone, response);
@@ -345,10 +378,12 @@ class OrchestratorService {
 
     // Se for pergunta sobre CARRO ou IMOVEL, responder conversacionalmente
     if (intent === 'QUESTION' || intent === 'OTHER') {
+      const preferredLanguage = session.preferredLanguage || 'pt';
       const response = await aiService.generateConversationalResponse(
         message, 
         session.history || [], 
-        classification
+        classification,
+        preferredLanguage
       );
       
       await whatsappService.sendMessage(phone, response);
@@ -364,11 +399,12 @@ class OrchestratorService {
     if (intent === 'QUOTE_REQUEST' && classification && classification !== 'OUTROS') {
       sessionService.updateSession(phone, {
         consortiumType: classification,
-        state: 'AWAITING_DATA'
+        state: 'AWAITING_DATA',
+        originalMessage: message // Salvar mensagem original para contexto
       });
 
       if (classification === 'CARRO') {
-        await whatsappService.requestCarData(phone);
+        await whatsappService.requestCarData(phone, message);
       } else if (classification === 'IMOVEL') {
         await whatsappService.requestPropertyData(phone);
       }
@@ -380,6 +416,33 @@ class OrchestratorService {
    * Trata coleta de dados do cliente
    */
   async handleDataCollection(phone, message, session) {
+    // Verificar se cliente quer falar com humano ou fechar negócio
+    const intent = await aiService.detectUserIntent(message, session.history || []);
+    
+    if (intent === 'HUMAN_REQUEST') {
+      await whatsappService.forwardToHuman(phone, 'Cliente solicitou atendimento humano durante coleta de dados', {
+        message: message,
+        consortiumType: session.consortiumType
+      });
+      sessionService.updateSession(phone, { 
+        state: 'FORWARDED_TO_HUMAN'
+      });
+      return;
+    }
+
+    // Verificar se quer fechar negócio
+    const wantsToClose = await aiService.detectClosingIntent(message);
+    if (wantsToClose) {
+      await whatsappService.forwardToHuman(phone, 'Cliente quer prosseguir com fechamento', {
+        message: message,
+        consortiumType: session.consortiumType
+      });
+      sessionService.updateSession(phone, { 
+        state: 'FORWARDED_TO_HUMAN'
+      });
+      return;
+    }
+
     // Extrair dados com IA
     const extractedData = await aiService.extractCustomerData(
       message, 
@@ -387,9 +450,13 @@ class OrchestratorService {
     );
 
     if (!extractedData) {
+      // Mensagem vaga ou não entendida - pedir esclarecimento
       await whatsappService.sendMessage(
         phone,
-        '❌ Não consegui entender os dados. Por favor, envie novamente no formato indicado.'
+        '🤔 Não consegui entender completamente sua mensagem.\n\nPor favor, envie os dados no formato indicado:\n\n' +
+        (session.consortiumType === 'CARRO' 
+          ? 'Valor: R$ 50000\nPrazo: 60 meses\nNome: João Silva\nCPF: 123.456.789-00\nData Nascimento: 01/01/1990\nEmail: joao@email.com'
+          : 'Valor: R$ 300000\nPrazo: 120 meses\nNome: Maria Silva\nCPF: 123.456.789-00\nData Nascimento: 01/01/1990\nEmail: maria@email.com')
       );
       return;
     }
@@ -399,15 +466,17 @@ class OrchestratorService {
 
     if (!validation.valid) {
       if (validation.missingFields) {
+        // Dados incompletos - pedir esclarecimento específico
         const msg = aiService.generateMissingFieldsMessage(
           validation.missingFields, 
           session.consortiumType
         );
         await whatsappService.sendMessage(phone, msg);
       } else if (validation.error) {
+        // Erro de validação - pedir correção
         await whatsappService.sendMessage(
           phone,
-          `❌ ${validation.error}\n\nPor favor, corrija e envie novamente.`
+          `❌ ${validation.error}\n\nPor favor, corrija e envie novamente no formato indicado.`
         );
       }
       return;
@@ -499,15 +568,23 @@ class OrchestratorService {
         // Ignorar erro se navegador não estiver aberto
       }
       
-      await whatsappService.sendErrorMessage(phone);
+      // Enviar mensagem de erro e permitir que cliente tente novamente
+      await whatsappService.sendMessage(
+        phone,
+        '❌ Ops! Ocorreu um erro ao gerar sua cotação.\n\n' +
+        'Você pode:\n' +
+        '• Tentar novamente enviando os dados\n' +
+        '• Digitar *MENU* para começar de novo\n' +
+        '• Digitar *AJUDA* se precisar de assistência'
+      );
       
-      // Encaminhar para humano
-      await whatsappService.forwardToHuman(phone, 'Erro na geração de cotação', {
-        error: error.message,
-        data: data
+      // Resetar para estado inicial para permitir nova tentativa
+      sessionService.updateSession(phone, { 
+        state: 'INITIAL'
       });
-
-      sessionService.updateSession(phone, { state: 'FORWARDED_TO_HUMAN' });
+      
+      // Apenas notificar admin sobre erro, mas não encaminhar cliente automaticamente
+      console.error('⚠️  Erro na geração de cotação - cliente pode tentar novamente');
     }
   }
 
@@ -515,7 +592,110 @@ class OrchestratorService {
    * Trata mensagens após cotação enviada
    */
   async handlePostQuotation(phone, message, session) {
-    // Detectar intenção
+    // PRIMEIRO: Verificar se a mensagem contém dados completos de cotação
+    // Isso é crítico para capturar mensagens que seguem o formato esperado
+    // mesmo que não sejam explicitamente detectadas como QUOTE_REQUEST
+    const hasCompleteDataFormat = this.looksLikeCompleteQuoteData(message);
+    
+    if (hasCompleteDataFormat) {
+      console.log('📋 Mensagem parece conter dados completos de cotação, processando...');
+      
+      // Tentar classificar e extrair dados
+      const classification = await aiService.classifyConsortiumType(message);
+      
+      // Se for OUTROS (moto, etc.), encaminhar para humano
+      if (classification === 'OUTROS') {
+        await whatsappService.forwardToHuman(
+          phone, 
+          'Solicitação de cotação para tipo não automatizado',
+          {
+            message: message,
+            consortiumType: classification,
+            previousQuotation: session.quotation
+          }
+        );
+        sessionService.updateSession(phone, { 
+          state: 'FORWARDED_TO_HUMAN',
+          consortiumType: 'OUTROS'
+        });
+        return;
+      }
+      
+      // Se for CARRO ou IMOVEL, tentar extrair e processar
+      if (classification === 'CARRO' || classification === 'IMOVEL') {
+        const extractedData = await aiService.extractCustomerData(message, classification);
+        if (extractedData) {
+          const validation = aiService.validateData(extractedData, classification);
+          if (validation.valid) {
+            // Dados completos e válidos - processar como nova cotação
+            console.log('✅ Dados completos detectados - processando nova cotação');
+            sessionService.clearSession(phone);
+            const newSession = sessionService.createSession(phone);
+            newSession.consortiumType = classification;
+            newSession.data = extractedData;
+            newSession.state = 'PROCESSING';
+            sessionService.updateSession(phone, newSession);
+            
+            await whatsappService.sendProcessingMessage(phone);
+            await this.generateQuotation(phone, classification, extractedData);
+            return;
+          } else {
+            // Dados extraídos mas inválidos - pedir esclarecimento
+            console.log('⚠️  Dados extraídos mas inválidos:', validation);
+            const preferredLanguage = session.preferredLanguage || 'pt';
+            
+            if (validation.missingFields) {
+              // Dados incompletos - pedir campos faltantes
+              const msg = aiService.generateMissingFieldsMessage(
+                validation.missingFields, 
+                classification
+              );
+              await whatsappService.sendMessage(phone, msg);
+              sessionService.addToHistory(phone, msg, 'bot');
+              sessionService.updateSession(phone, { 
+                state: 'AWAITING_DATA',
+                consortiumType: classification
+              });
+            } else if (validation.error) {
+              // Erro de validação - pedir correção
+              const errorMsg = preferredLanguage === 'en'
+                ? `❌ ${validation.error}\n\nPlease correct and send again in the indicated format.`
+                : `❌ ${validation.error}\n\nPor favor, corrija e envie novamente no formato indicado.`;
+              await whatsappService.sendMessage(phone, errorMsg);
+              sessionService.addToHistory(phone, errorMsg, 'bot');
+              sessionService.updateSession(phone, { 
+                state: 'AWAITING_DATA',
+                consortiumType: classification
+              });
+            }
+            return; // Não continuar para outras verificações
+          }
+        } else {
+          // Falha na extração - pedir esclarecimento
+          console.log('⚠️  Falha na extração de dados da mensagem');
+          const preferredLanguage = session.preferredLanguage || 'pt';
+          const clarificationMsg = preferredLanguage === 'en'
+            ? '🤔 I couldn\'t fully understand your message.\n\nPlease send the data in the indicated format:\n\n' +
+              (classification === 'CARRO' 
+                ? 'Value: R$ 50000\nTerm: 60 months\nName: João Silva\nCPF: 123.456.789-00\nDate of Birth: 01/01/1990\nEmail: joao@email.com'
+                : 'Value: R$ 300000\nTerm: 120 months\nName: Maria Silva\nCPF: 123.456.789-00\nDate of Birth: 01/01/1990\nEmail: maria@email.com')
+            : '🤔 Não consegui entender completamente sua mensagem.\n\nPor favor, envie os dados no formato indicado:\n\n' +
+              (classification === 'CARRO' 
+                ? 'Valor: R$ 50000\nPrazo: 60 meses\nNome: João Silva\nCPF: 123.456.789-00\nData Nascimento: 01/01/1990\nEmail: joao@email.com'
+                : 'Valor: R$ 300000\nPrazo: 120 meses\nNome: Maria Silva\nCPF: 123.456.789-00\nData Nascimento: 01/01/1990\nEmail: maria@email.com');
+          
+          await whatsappService.sendMessage(phone, clarificationMsg);
+          sessionService.addToHistory(phone, clarificationMsg, 'bot');
+          sessionService.updateSession(phone, { 
+            state: 'AWAITING_DATA',
+            consortiumType: classification
+          });
+          return; // Não continuar para outras verificações
+        }
+      }
+    }
+
+    // SEGUNDO: Detectar intenção explícita
     const intent = await aiService.detectUserIntent(message, session.history || []);
 
     if (intent === 'HUMAN_REQUEST') {
@@ -536,19 +716,96 @@ class OrchestratorService {
     }
 
     if (intent === 'QUOTE_REQUEST') {
-      // Cliente quer outra cotação - resetar para estado inicial
+      // Cliente quer outra cotação - verificar tipo e processar
+      const classification = await aiService.classifyConsortiumType(message);
+      
+      // Se for OUTROS (moto, etc.), encaminhar para humano
+      if (classification === 'OUTROS') {
+        await whatsappService.forwardToHuman(
+          phone, 
+          'Solicitação de cotação para tipo não automatizado',
+          {
+            message: message,
+            consortiumType: classification,
+            previousQuotation: session.quotation
+          }
+        );
+        sessionService.updateSession(phone, { 
+          state: 'FORWARDED_TO_HUMAN',
+          consortiumType: 'OUTROS'
+        });
+        return;
+      }
+      
+      // Se for CARRO ou IMOVEL, processar normalmente
+      // Resetar sessão e processar como nova cotação
       sessionService.clearSession(phone);
       const newSession = sessionService.createSession(phone);
       await this.handleInitialState(phone, message, newSession);
       return;
     }
 
+    // TERCEIRO: Verificar se a mensagem contém dados parciais de cotação
+    // Isso ajuda a capturar mensagens como "E se fosse 50 mil?" ou "Quero outra cotação"
+    const classification = await aiService.classifyConsortiumType(message);
+    if (classification === 'CARRO' || classification === 'IMOVEL') {
+      // Tentar extrair dados - pode ser uma solicitação de cotação não detectada
+      const extractedData = await aiService.extractCustomerData(message, classification);
+      if (extractedData) {
+        const validation = aiService.validateData(extractedData, classification);
+        if (validation.valid) {
+          // É uma solicitação de cotação válida - processar
+          console.log('✅ Solicitação de cotação detectada em mensagem pós-cotação');
+          sessionService.clearSession(phone);
+          const newSession = sessionService.createSession(phone);
+          newSession.consortiumType = classification;
+          newSession.data = extractedData;
+          newSession.state = 'PROCESSING';
+          sessionService.updateSession(phone, newSession);
+          
+          await whatsappService.sendProcessingMessage(phone);
+          await this.generateQuotation(phone, classification, extractedData);
+          return;
+        } else {
+          // Dados parciais mas inválidos - pedir esclarecimento ao invés de encaminhar
+          console.log('⚠️  Dados parciais detectados mas inválidos:', validation);
+          const preferredLanguage = session.preferredLanguage || 'pt';
+          
+          if (validation.missingFields) {
+            const msg = aiService.generateMissingFieldsMessage(
+              validation.missingFields, 
+              classification
+            );
+            await whatsappService.sendMessage(phone, msg);
+            sessionService.addToHistory(phone, msg, 'bot');
+            sessionService.updateSession(phone, { 
+              state: 'AWAITING_DATA',
+              consortiumType: classification
+            });
+          } else if (validation.error) {
+            const errorMsg = preferredLanguage === 'en'
+              ? `❌ ${validation.error}\n\nPlease correct and send again in the indicated format.`
+              : `❌ ${validation.error}\n\nPor favor, corrija e envie novamente no formato indicado.`;
+            await whatsappService.sendMessage(phone, errorMsg);
+            sessionService.addToHistory(phone, errorMsg, 'bot');
+            sessionService.updateSession(phone, { 
+              state: 'AWAITING_DATA',
+              consortiumType: classification
+            });
+          }
+          return; // Não continuar para outras verificações
+        }
+      }
+    }
+
     // Perguntas - responder conversacionalmente
     if (intent === 'QUESTION' || intent === 'OTHER') {
+      const preferredLanguage = session.preferredLanguage || 'pt';
       const response = await aiService.generateConversationalResponse(
         message, 
         session.history || [], 
-        session.consortiumType
+        session.consortiumType,
+        preferredLanguage
       );
       
       await whatsappService.sendMessage(phone, response);
@@ -577,18 +834,85 @@ class OrchestratorService {
       return;
     }
 
-    // Fallback - encaminhar para humano
-    await whatsappService.forwardToHuman(
-      phone,
-      'Mensagem pós-cotação não classificada',
-      {
-        message: message,
-        quotation: session.quotation
-      }
+    // Fallback - apenas para mensagens verdadeiramente não classificadas
+    // NUNCA encaminhar para humano automaticamente - sempre tentar responder conversacionalmente
+    // ou pedir esclarecimento se a mensagem for ambígua
+    console.log('⚠️  Mensagem pós-cotação não classificada claramente, tentando resposta conversacional');
+    const preferredLanguage = session.preferredLanguage || 'pt';
+    
+    // Se a mensagem parece ser uma solicitação mas não foi classificada corretamente,
+    // pedir esclarecimento ao invés de apenas responder conversacionalmente
+    const messageLower = message.toLowerCase();
+    const mightBeQuoteRequest = 
+      messageLower.includes('cotação') || 
+      messageLower.includes('cotar') || 
+      messageLower.includes('valor') || 
+      messageLower.includes('preço') ||
+      messageLower.includes('quote') ||
+      /r\$\s*\d+/i.test(message) ||
+      /\d+\s*(mil|milh)/i.test(message);
+    
+    // Verificar se intent foi definido (pode não estar se pulamos algumas verificações)
+    const currentIntent = typeof intent !== 'undefined' ? intent : null;
+    
+    if (mightBeQuoteRequest && currentIntent !== 'QUESTION') {
+      // Parece ser uma solicitação de cotação mas não foi detectada claramente
+      // Pedir esclarecimento ao invés de encaminhar para humano
+      const clarificationMsg = preferredLanguage === 'en'
+        ? '🤔 I understand you might be requesting a quote, but I need a bit more clarity.\n\n' +
+          'Could you please:\n' +
+          '• Specify if you want a quote for a car or property consortium\n' +
+          '• Or send the complete data in the format:\n\n' +
+          'Value: R$ 50000\nTerm: 60 months\nName: João Silva\nCPF: 123.456.789-00\nDate of Birth: 01/01/1990\nEmail: joao@email.com'
+        : '🤔 Entendo que você pode estar solicitando uma cotação, mas preciso de um pouco mais de clareza.\n\n' +
+          'Você poderia, por favor:\n' +
+          '• Especificar se deseja cotação de consórcio de carro ou imóvel\n' +
+          '• Ou enviar os dados completos no formato:\n\n' +
+          'Valor: R$ 50000\nPrazo: 60 meses\nNome: João Silva\nCPF: 123.456.789-00\nData Nascimento: 01/01/1990\nEmail: joao@email.com';
+      
+      await whatsappService.sendMessage(phone, clarificationMsg);
+      sessionService.addToHistory(phone, clarificationMsg, 'bot');
+      sessionService.updateSession(phone, { 
+        state: 'COMPLETED' // Manter estado COMPLETED mas permitir nova cotação
+      });
+      return;
+    }
+    
+    // Caso contrário, responder conversacionalmente
+    const response = await aiService.generateConversationalResponse(
+      message, 
+      session.history || [], 
+      session.consortiumType,
+      preferredLanguage
     );
+    
+    await whatsappService.sendMessage(phone, response);
+    sessionService.addToHistory(phone, response, 'bot');
     sessionService.updateSession(phone, { 
-      state: 'FORWARDED_TO_HUMAN'
+      state: 'COMPLETED'
     });
+  }
+
+  /**
+   * Verifica se a mensagem parece conter dados completos de cotação
+   * Baseado no formato esperado: Valor, Prazo, Nome, CPF, Data Nascimento, Email
+   */
+  looksLikeCompleteQuoteData(message) {
+    const messageUpper = message.toUpperCase();
+    
+    // Verificar se contém os campos principais no formato esperado
+    const hasValor = /VALOR\s*:?\s*R?\$?\s*\d+/i.test(message);
+    const hasPrazo = /PRAZO\s*:?\s*\d+\s*(MES|MESES|M)/i.test(message);
+    const hasNome = /NOME\s*:?/i.test(message);
+    const hasCPF = /CPF\s*:?/i.test(message);
+    const hasDataNascimento = /(DATA\s*NASCIMENTO|DATA\s*DE\s*NASCIMENTO)\s*:?/i.test(message);
+    const hasEmail = /EMAIL\s*:?/i.test(message) || /@/.test(message);
+    
+    // Se tiver pelo menos 4 dos 6 campos principais, provavelmente é dados de cotação
+    const fieldCount = [hasValor, hasPrazo, hasNome, hasCPF, hasDataNascimento, hasEmail].filter(Boolean).length;
+    
+    // Requer pelo menos valor, prazo e mais 2 campos
+    return hasValor && hasPrazo && fieldCount >= 4;
   }
 
   /**
