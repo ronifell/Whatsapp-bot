@@ -40,6 +40,8 @@ class WhatsAppService {
    */
   async sendMessage(phone, message) {
     try {
+      const timestamp = new Date().toLocaleString('pt-BR');
+      
       // Modo frontend: enviar para message bus
       if (this.isFrontendUser(phone)) {
         messageBus.addMessage(phone, message, 'bot');
@@ -49,19 +51,29 @@ class WhatsAppService {
 
       // Modo de teste: apenas logar, não enviar realmente
       if (this.isTestMode()) {
-        console.log('\n📱 [MODO TESTE] Mensagem que seria enviada:');
-        console.log(`   Para: ${phone}`);
-        console.log(`   Mensagem:\n${message}\n`);
-        console.log('─'.repeat(60));
+        console.log('\n' + '═'.repeat(70));
+        console.log(`📤 [MODO TESTE] Mensagem que seria enviada [${timestamp}]`);
+        console.log('─'.repeat(70));
+        console.log(`👤 Para: ${phone}`);
+        console.log(`💬 Mensagem:\n${message}\n`);
+        console.log('═'.repeat(70) + '\n');
         return { success: true, testMode: true };
       }
+
+      // Log formatado antes de enviar
+      console.log('\n' + '═'.repeat(70));
+      console.log(`📤 MENSAGEM ENVIADA [${timestamp}]`);
+      console.log('─'.repeat(70));
+      console.log(`👤 Para: ${phone}`);
+      console.log(`💬 Mensagem:\n${message}`);
+      console.log('═'.repeat(70) + '\n');
 
       const response = await axios.post(`${this.apiUrl}/send-text`, {
         phone: phone,
         message: message
       });
       
-      console.log(`✅ Mensagem enviada para ${phone}`);
+      console.log(`✅ Mensagem enviada com sucesso para ${phone}\n`);
       return response.data;
     } catch (error) {
       console.error('❌ Erro ao enviar mensagem:', error.response?.data || error.message);
@@ -74,6 +86,8 @@ class WhatsAppService {
    */
   async sendMessageWithLink(phone, message) {
     try {
+      const timestamp = new Date().toLocaleString('pt-BR');
+      
       // Modo frontend: enviar para message bus
       if (this.isFrontendUser(phone)) {
         messageBus.addMessage(phone, message, 'bot');
@@ -83,19 +97,29 @@ class WhatsAppService {
 
       // Modo de teste: apenas logar, não enviar realmente
       if (this.isTestMode()) {
-        console.log('\n📱 [MODO TESTE] Mensagem com link que seria enviada:');
-        console.log(`   Para: ${phone}`);
-        console.log(`   Mensagem:\n${message}\n`);
-        console.log('─'.repeat(60));
+        console.log('\n' + '═'.repeat(70));
+        console.log(`📤 [MODO TESTE] Mensagem com link que seria enviada [${timestamp}]`);
+        console.log('─'.repeat(70));
+        console.log(`👤 Para: ${phone}`);
+        console.log(`💬 Mensagem:\n${message}\n`);
+        console.log('═'.repeat(70) + '\n');
         return { success: true, testMode: true };
       }
+
+      // Log formatado antes de enviar
+      console.log('\n' + '═'.repeat(70));
+      console.log(`📤 MENSAGEM COM LINK ENVIADA [${timestamp}]`);
+      console.log('─'.repeat(70));
+      console.log(`👤 Para: ${phone}`);
+      console.log(`💬 Mensagem:\n${message}`);
+      console.log('═'.repeat(70) + '\n');
 
       const response = await axios.post(`${this.apiUrl}/send-text`, {
         phone: phone,
         message: message
       });
       
-      console.log(`✅ Mensagem com link enviada para ${phone}`);
+      console.log(`✅ Mensagem com link enviada com sucesso para ${phone}\n`);
       return response.data;
     } catch (error) {
       console.error('❌ Erro ao enviar mensagem:', error.response?.data || error.message);
@@ -190,8 +214,8 @@ class WhatsAppService {
         return { success: true, testMode: true };
       }
 
-      const response = await axios.post(`${this.apiUrl}/update-webhook`, {
-        webhook: webhookUrl
+      const response = await axios.post(`${this.apiUrl}/set-webhook`, {
+        value: webhookUrl
       });
       
       console.log('✅ Webhook configurado');
@@ -299,6 +323,8 @@ Por favor, aguarde... 🤖`;
    * Envia cotação ao cliente
    */
   async sendQuotation(phone, quotationData) {
+    const timestamp = new Date().toLocaleString('pt-BR');
+    
     const message = `✅ *Cotação Gerada com Sucesso!*
 
 📋 *Detalhes da Cotação:*
@@ -318,6 +344,20 @@ ${quotationData.details || ''}
 Para *prosseguir com o fechamento*, digite: *FECHAR*
 
 Precisa de ajuda? Digite: *AJUDA*`;
+
+    // Log especial para cotações
+    if (!this.isFrontendUser(phone) && !this.isTestMode()) {
+      console.log('\n' + '═'.repeat(70));
+      console.log(`💰 COTAÇÃO ENVIADA [${timestamp}]`);
+      console.log('─'.repeat(70));
+      console.log(`👤 Para: ${phone}`);
+      console.log(`📊 Tipo: ${quotationData.type}`);
+      console.log(`💵 Valor: R$ ${quotationData.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`);
+      console.log(`📅 Prazo: ${quotationData.months} meses`);
+      console.log(`💳 Parcela: R$ ${quotationData.monthlyPayment.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`);
+      console.log(`📈 Taxa Admin: ${quotationData.adminFee}%`);
+      console.log('═'.repeat(70) + '\n');
+    }
 
     return this.sendMessage(phone, message);
   }

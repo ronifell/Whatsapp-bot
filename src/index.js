@@ -2,6 +2,7 @@ import express from 'express';
 import { config, validateConfig } from './config/config.js';
 import orchestrator from './services/orchestrator.service.js';
 import messageBus from './services/message-bus.service.js';
+import whatsappService from './services/whatsapp.service.js';
 
 const app = express();
 
@@ -37,21 +38,61 @@ app.get('/', (req, res) => {
  */
 app.post('/webhook', async (req, res) => {
   try {
-    console.log('\n📨 Webhook recebido:', JSON.stringify(req.body, null, 2));
-
     const { phone, message, instanceId } = req.body;
+    const timestamp = new Date().toLocaleString('pt-BR');
 
     // Validar dados básicos
     if (!phone || !message) {
       console.warn('⚠️ Webhook inválido: falta phone ou message');
+      console.warn('📋 Body recebido:', JSON.stringify(req.body, null, 2));
       return res.status(400).json({ error: 'Dados inválidos' });
+    }
+
+    // Validar instanceId (segurança)
+    if (instanceId && config.zapi.instanceId && instanceId !== config.zapi.instanceId) {
+      console.warn(`⚠️ Webhook recebido de instância não autorizada: ${instanceId} (esperado: ${config.zapi.instanceId})`);
+      return res.status(403).json({ error: 'Instância não autorizada' });
+    }
+
+    // Extrair texto da mensagem de forma robusta
+    let messageText = '';
+    if (typeof message === 'string') {
+      messageText = message;
+    } else if (message?.text) {
+      messageText = message.text;
+    } else if (message?.body) {
+      messageText = message.body;
+    } else if (message?.message) {
+      messageText = message.message;
+    } else if (message?.content) {
+      messageText = message.content;
+    } else {
+      console.warn('⚠️ Formato de mensagem desconhecido:', JSON.stringify(message));
+      messageText = JSON.stringify(message);
+    }
+
+    // Ignorar mensagens vazias
+    if (!messageText.trim()) {
+      console.log('ℹ️ Ignorando mensagem vazia');
+      return res.status(200).json({ status: 'ignored', reason: 'empty_message' });
     }
 
     // Ignorar mensagens do próprio bot
     if (phone === config.whatsapp.businessNumber) {
       console.log('ℹ️ Ignorando mensagem do próprio bot');
-      return res.status(200).json({ status: 'ignored' });
+      return res.status(200).json({ status: 'ignored', reason: 'self_message' });
     }
+
+    // Log formatado da mensagem recebida
+    console.log('\n' + '═'.repeat(70));
+    console.log(`📥 MENSAGEM RECEBIDA [${timestamp}]`);
+    console.log('─'.repeat(70));
+    console.log(`👤 De: ${phone}`);
+    if (instanceId) {
+      console.log(`🔑 Instance ID: ${instanceId}`);
+    }
+    console.log(`💬 Mensagem: "${messageText}"`);
+    console.log('═'.repeat(70) + '\n');
 
     // Responder rapidamente ao webhook
     res.status(200).json({ status: 'received' });
@@ -59,14 +100,28 @@ app.post('/webhook', async (req, res) => {
     // Processar mensagem de forma assíncrona
     setImmediate(async () => {
       try {
-        await orchestrator.processMessage(phone, message.text || message);
+        await orchestrator.processMessage(phone, messageText);
       } catch (error) {
-        console.error('❌ Erro ao processar mensagem:', error);
+        console.error(`❌ Erro ao processar mensagem de ${phone}:`, error.message);
+        console.error('📋 Stack trace:', error.stack);
+        console.error('📋 Mensagem original:', messageText);
+        
+        // Tentar enviar mensagem de erro ao usuário
+        try {
+          await whatsappService.sendMessage(
+            phone,
+            '❌ Ocorreu um erro ao processar sua mensagem. Por favor, tente novamente ou digite *MENU* para começar de novo.'
+          );
+        } catch (sendError) {
+          console.error('❌ Erro ao enviar mensagem de erro:', sendError.message);
+        }
       }
     });
 
   } catch (error) {
-    console.error('❌ Erro no webhook:', error);
+    console.error('❌ Erro no webhook:', error.message);
+    console.error('📋 Stack trace:', error.stack);
+    console.error('📋 Request body:', JSON.stringify(req.body, null, 2));
     res.status(500).json({ error: 'Erro interno' });
   }
 });
@@ -256,11 +311,33 @@ async function startServer() {
     orchestrator.startSessionCleanup();
     console.log('✅ Limpeza automática ativada\n');
 
+    // Configurar webhook automaticamente se WEBHOOK_URL estiver definido
+    const webhookUrl = process.env.WEBHOOK_URL;
+    if (webhookUrl) {
+      console.log('🔧 Configurando webhook automaticamente...');
+      try {
+        await whatsappService.setWebhook(webhookUrl);
+        console.log(`✅ Webhook configurado: ${webhookUrl}\n`);
+      } catch (error) {
+        console.warn('⚠️  Aviso: Não foi possível configurar o webhook automaticamente');
+        console.warn('   Você pode configurá-lo manualmente usando: npm run configure:webhook <URL>');
+        console.warn(`   Erro: ${error.message}\n`);
+      }
+    } else {
+      console.log('ℹ️  WEBHOOK_URL não configurado no .env');
+      console.log('   Configure manualmente usando: npm run configure:webhook <URL>\n');
+    }
+
     // Iniciar servidor
     const port = config.server.port;
     app.listen(port, () => {
       console.log(`✅ Servidor rodando na porta ${port}`);
       console.log(`📡 Webhook URL: http://localhost:${port}/webhook`);
+      if (webhookUrl) {
+        console.log(`🌐 Webhook público configurado: ${webhookUrl}`);
+      } else {
+        console.log(`🌐 Para configurar webhook público, use: npm run configure:webhook <URL>`);
+      }
       console.log(`🌐 Health check: http://localhost:${port}/`);
       console.log(`📊 Stats: http://localhost:${port}/stats`);
       console.log(`🧪 Test endpoint: POST http://localhost:${port}/test-message`);

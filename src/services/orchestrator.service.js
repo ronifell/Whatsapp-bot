@@ -15,7 +15,7 @@ class OrchestratorService {
    */
   async processMessage(phone, message) {
     try {
-      console.log(`\n📱 Nova mensagem de ${phone}: "${message}"`);
+      // Log já foi feito no webhook, apenas processar aqui
       
       // Obter ou criar sessão
       let session = sessionService.getSession(phone);
