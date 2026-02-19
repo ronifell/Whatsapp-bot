@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { config } from '../config/config.js';
 import messageBus from './message-bus.service.js';
+import businessHoursService from './business-hours.service.js';
 
 /**
  * Serviço de integração com Z-API para WhatsApp
@@ -572,7 +573,40 @@ Obrigado pela preferência! 😊
 
 🤖 Se precisar da minha ajuda no futuro, por favor, me diga que quer falar com o bot novamente.`;
 
-    return this.sendMessage(phone, messageToCustomer);
+    await this.sendMessage(phone, messageToCustomer);
+
+    // Check if outside business hours - if so, send additional message asking if they want to chat with bot
+    const isBusinessHours = businessHoursService.isBusinessHours();
+    
+    if (!isBusinessHours) {
+      // Outside business hours - send message asking if they want to chat with bot
+      const botChatMessage = preferredLanguage === 'en'
+        ? `⏰ *Outside Business Hours*
+
+Our counselors are currently offline. They will respond to you shortly during business hours (Monday to Friday, 8:30 AM - 12:00 PM).
+
+Would you like to chat with me (the bot) while you wait? I'm here to help answer your questions! 😊
+
+Please reply with:
+• *YES* or *SIM* to chat with me
+• *NO* or *NÃO* to wait for a human counselor`
+        : `⏰ *Fora do Horário de Funcionamento*
+
+Nossos consultores estão fora do horário de atendimento no momento. Eles responderão em breve durante o horário de funcionamento (Segunda a Sexta, 8:30 - 12:00).
+
+Gostaria de conversar comigo (o bot) enquanto espera? Estou aqui para ajudar a responder suas dúvidas! 😊
+
+Por favor, responda com:
+• *SIM* para conversar comigo
+• *NÃO* para aguardar um consultor humano`;
+
+      await this.sendMessage(phone, botChatMessage);
+      
+      // Return flag to indicate we're waiting for bot chat confirmation
+      return { waitingForBotChatConfirmation: true };
+    }
+
+    return { waitingForBotChatConfirmation: false };
   }
 
   /**

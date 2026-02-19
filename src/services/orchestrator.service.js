@@ -126,6 +126,10 @@ class OrchestratorService {
           await this.handleHumanConfirmation(phone, message, session);
           break;
 
+        case 'AWAITING_BOT_CHAT_CONFIRMATION':
+          await this.handleBotChatConfirmation(phone, message, session);
+          break;
+
         case 'FORWARDED_TO_HUMAN':
           // Não deve chegar aqui devido ao check acima, mas por segurança
           console.log(`🔇 Mensagem de ${phone} ignorada - cliente já está com atendente humano`);
@@ -192,6 +196,55 @@ class OrchestratorService {
   }
 
   /**
+   * Trata resposta de confirmação para conversar com o bot (fora do horário de funcionamento)
+   */
+  async handleBotChatConfirmation(phone, message, session) {
+    const confirmation = aiService.detectConfirmation(message);
+    const preferredLanguage = session.preferredLanguage || 'pt';
+    
+    if (confirmation === 'yes') {
+      // Cliente quer conversar com o bot - reativar conversação com bot
+      const botResponse = preferredLanguage === 'en'
+        ? '🤖 Great! I\'m here to help you. How can I assist you today?'
+        : '🤖 Ótimo! Estou aqui para ajudá-lo. Como posso ajudá-lo hoje?';
+      
+      await whatsappService.sendMessage(phone, botResponse);
+      sessionService.addToHistory(phone, botResponse, 'bot');
+      
+      // Atualizar estado para permitir conversação com bot
+      const newState = session.consortiumType ? 'COMPLETED' : 'CONVERSATIONAL';
+      sessionService.updateSession(phone, {
+        state: newState
+      });
+      
+      console.log(`✅ Bot ativado para ${phone} - cliente escolheu conversar com bot fora do horário`);
+    } else if (confirmation === 'no') {
+      // Cliente prefere aguardar consultor humano
+      const waitMessage = preferredLanguage === 'en'
+        ? '👍 No problem! Our counselors will contact you during business hours (Monday to Friday, 8:30 AM - 12:00 PM).\n\nThank you for your patience! 😊'
+        : '👍 Sem problema! Nossos consultores entrarão em contato durante o horário de funcionamento (Segunda a Sexta, 8:30 - 12:00).\n\nObrigado pela paciência! 😊';
+      
+      await whatsappService.sendMessage(phone, waitMessage);
+      sessionService.addToHistory(phone, waitMessage, 'bot');
+      
+      // Manter estado FORWARDED_TO_HUMAN para que o cliente aguarde
+      sessionService.updateSession(phone, {
+        state: 'FORWARDED_TO_HUMAN'
+      });
+      
+      console.log(`⏳ Cliente ${phone} escolheu aguardar consultor humano`);
+    } else {
+      // Resposta não clara - pedir esclarecimento
+      const clarificationMsg = preferredLanguage === 'en'
+        ? '🤔 I didn\'t understand your response.\n\nPlease reply with:\n• *YES* or *SIM* to chat with me (the bot)\n• *NO* or *NÃO* to wait for a human counselor'
+        : '🤔 Não entendi sua resposta.\n\nPor favor, responda com:\n• *SIM* para conversar comigo (o bot)\n• *NÃO* para aguardar um consultor humano';
+      await whatsappService.sendMessage(phone, clarificationMsg);
+      sessionService.addToHistory(phone, clarificationMsg, 'bot');
+      // Manter estado AWAITING_BOT_CHAT_CONFIRMATION
+    }
+  }
+
+  /**
    * Trata resposta de confirmação para conectar ao consultor
    */
   async handleHumanConfirmation(phone, message, session) {
@@ -203,16 +256,27 @@ class OrchestratorService {
       const pendingForward = session.pendingHumanForward;
       
       if (pendingForward) {
-        await whatsappService.forwardToHuman(phone, pendingForward.reason, pendingForward.customerData, preferredLanguage);
-        sessionService.updateSession(phone, {
-          state: 'FORWARDED_TO_HUMAN',
-          pendingHumanForward: null
-        });
+        const forwardResult = await whatsappService.forwardToHuman(phone, pendingForward.reason, pendingForward.customerData, preferredLanguage);
         
-        const confirmMsg = preferredLanguage === 'en'
-          ? '✅ Connecting you to a counselor now...'
-          : '✅ Conectando você a um consultor agora...';
-        sessionService.addToHistory(phone, confirmMsg, 'bot');
+        // Check if we're waiting for bot chat confirmation (outside business hours)
+        if (forwardResult && forwardResult.waitingForBotChatConfirmation) {
+          // Update session to wait for bot chat confirmation
+          sessionService.updateSession(phone, {
+            state: 'AWAITING_BOT_CHAT_CONFIRMATION',
+            pendingHumanForward: null
+          });
+        } else {
+          // During business hours - normal forward
+          sessionService.updateSession(phone, {
+            state: 'FORWARDED_TO_HUMAN',
+            pendingHumanForward: null
+          });
+          
+          const confirmMsg = preferredLanguage === 'en'
+            ? '✅ Connecting you to a counselor now...'
+            : '✅ Conectando você a um consultor agora...';
+          sessionService.addToHistory(phone, confirmMsg, 'bot');
+        }
       } else {
         // Dados não encontrados - tratar como erro
         console.error('⚠️  Dados de encaminhamento não encontrados na sessão');
