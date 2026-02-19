@@ -1,10 +1,44 @@
 import express from 'express';
+import { execSync } from 'child_process';
 import { config, validateConfig } from './config/config.js';
 import orchestrator from './services/orchestrator.service.js';
 import messageBus from './services/message-bus.service.js';
 import whatsappService from './services/whatsapp.service.js';
 
 const app = express();
+
+/**
+ * Verificar e instalar browsers do Playwright se necessário (apenas em produção)
+ */
+async function ensurePlaywrightBrowsers() {
+  if (process.env.NODE_ENV === 'production') {
+    try {
+      console.log('🔍 Verificando instalação dos browsers do Playwright...');
+      // Tentar verificar se o chromium existe
+      const { chromium } = await import('playwright');
+      try {
+        // Tentar lançar o browser para verificar se está instalado
+        const browser = await chromium.launch({ headless: true });
+        await browser.close();
+        console.log('✅ Browsers do Playwright já instalados');
+      } catch (error) {
+        if (error.message.includes('Executable doesn\'t exist') || error.message.includes('browserType.launch')) {
+          console.log('⚠️ Browsers não encontrados, tentando instalar...');
+          execSync('npx playwright install chromium', { 
+            stdio: 'inherit',
+            timeout: 300000 // 5 minutos
+          });
+          console.log('✅ Browsers do Playwright instalados com sucesso');
+        } else {
+          throw error;
+        }
+      }
+    } catch (error) {
+      console.warn('⚠️ Aviso: Não foi possível verificar/instalar browsers automaticamente:', error.message);
+      console.warn('💡 Certifique-se de que o build command no Render inclui: npm install && npx playwright install chromium');
+    }
+  }
+}
 
 // Middleware
 app.use(express.json());
@@ -314,6 +348,9 @@ app.get('/api/frontend/messages/:phone/stream', (req, res) => {
 async function startServer() {
   try {
     console.log('\n🚀 Iniciando CotaFácil Automação...\n');
+
+    // Verificar/instalar browsers do Playwright antes de iniciar
+    await ensurePlaywrightBrowsers();
 
     // Validar configurações
     console.log('🔍 Validando configurações...');
