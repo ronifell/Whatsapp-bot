@@ -42,10 +42,54 @@ class OrchestratorService {
         return;
       }
 
-      // Se já foi encaminhado para humano, não processar mensagens do bot
+      // Se já foi encaminhado para humano, verificar se cliente quer falar com bot novamente
       if (session.state === 'FORWARDED_TO_HUMAN') {
-        console.log(`🔇 Mensagem de ${phone} ignorada - cliente já está com atendente humano`);
-        return;
+        console.log(`🔍 Verificando se cliente ${phone} quer falar com bot. Mensagem: "${message}"`);
+        const wantsToTalkToBot = aiService.detectBotRequest(message);
+        
+        if (wantsToTalkToBot) {
+          // Cliente quer falar com bot novamente - reativar bot
+          const preferredLanguage = session.preferredLanguage || 'pt';
+          const botResponse = preferredLanguage === 'en'
+            ? '🤖 Hello! I\'m the bot and I\'m here to help you. How can I assist you today?'
+            : '🤖 Olá! Eu sou o bot e estou aqui para ajudá-lo. Como posso ajudá-lo hoje?';
+          
+          console.log(`✅ Bot reativado para ${phone} - cliente solicitou falar com bot`);
+          await whatsappService.sendMessage(phone, botResponse);
+          sessionService.addToHistory(phone, botResponse, 'bot');
+          
+          // Atualizar estado para permitir conversação com bot
+          const newState = session.consortiumType ? 'COMPLETED' : 'CONVERSATIONAL';
+          sessionService.updateSession(phone, {
+            state: newState
+          });
+          
+          // Atualizar referência da sessão para continuar processamento
+          session = sessionService.getSession(phone);
+          
+          // Se a mensagem contém mais do que apenas a solicitação de bot, continuar processando
+          // Exemplo: "quero falar com o bot, preciso de uma cotação"
+          const messageLower = message.toLowerCase();
+          const botRequestPhrases = ['quero falar com o bot', 'quero falar com bot', 'falar com o bot', 'falar com bot', 'bot', 'i want to talk to the bot', 'talk to bot'];
+          const isOnlyBotRequest = botRequestPhrases.some(phrase => {
+            const trimmed = messageLower.trim();
+            return trimmed === phrase || trimmed.startsWith(phrase + ',') || trimmed.startsWith(phrase + '.') || trimmed === phrase;
+          });
+          
+          // Se a mensagem contém apenas a solicitação de bot (ou muito próxima disso), não processar mais
+          // Caso contrário, continuar processando a mensagem normalmente
+          if (isOnlyBotRequest || messageLower.length < 30) {
+            console.log(`ℹ️ Mensagem contém apenas solicitação de bot, não processando conteúdo adicional`);
+            return;
+          } else {
+            console.log(`ℹ️ Mensagem contém solicitação de bot + conteúdo adicional, continuando processamento`);
+            // Continuar para processar o resto da mensagem (não fazer return aqui)
+          }
+        } else {
+          // Cliente ainda está com humano - não processar mensagens do bot
+          console.log(`🔇 Mensagem de ${phone} ignorada - cliente já está com atendente humano`);
+          return;
+        }
       }
 
       // Fluxo baseado no estado da sessão
@@ -159,7 +203,7 @@ class OrchestratorService {
       const pendingForward = session.pendingHumanForward;
       
       if (pendingForward) {
-        await whatsappService.forwardToHuman(phone, pendingForward.reason, pendingForward.customerData);
+        await whatsappService.forwardToHuman(phone, pendingForward.reason, pendingForward.customerData, preferredLanguage);
         sessionService.updateSession(phone, {
           state: 'FORWARDED_TO_HUMAN',
           pendingHumanForward: null
@@ -211,6 +255,21 @@ class OrchestratorService {
    * Trata estado inicial - detecta intenção e responde apropriadamente
    */
   async handleInitialState(phone, message, session) {
+    // Verificar se é a primeira mensagem do cliente (histórico tem apenas 1 mensagem do usuário)
+    const isFirstMessage = session.history && session.history.length === 1 && 
+                           session.history[0].type === 'user';
+    
+    if (isFirstMessage) {
+      // Primeira mensagem - enviar opções de consórcio
+      await whatsappService.sendFirstMessageWithOptions(phone);
+      sessionService.addToHistory(phone, 
+        'Oi! 👋 Sou o Bot da CotaFácil Alphaville. Eu faço sua simulação completa e já te devolvo cotação.\n\nVocê quer consórcio de:\n\n1. 🚗 Carro\n\n2. 🏠 Imóvel\n\n3. 🔧 Serviços (reforma, placas solares etc.)\n\n4. ❓ Não sei ainda\n\nVai para OBJETIVO',
+        'bot'
+      );
+      sessionService.updateSession(phone, { state: 'AWAITING_TYPE' });
+      return;
+    }
+
     // 1. Detectar intenção do usuário
     const intent = await aiService.detectUserIntent(message, session.history || []);
 
@@ -406,6 +465,72 @@ class OrchestratorService {
       await this.requestHumanConfirmation(phone, 'Cliente solicitou atendimento humano', {
         message: message
       }, session);
+      return;
+    }
+
+    // Detectar opções numéricas ou palavras-chave explícitas
+    const messageUpper = message.toUpperCase().trim();
+    const isOption1 = messageUpper === '1' || /^1\.?\s*(carro|autom[oó]vel|ve[ií]culo)/i.test(message);
+    const isOption2 = messageUpper === '2' || /^2\.?\s*(im[oó]vel|imovel|casa|apartamento)/i.test(message);
+    const isOption3 = messageUpper === '3' || /^3\.?\s*(servi[çc]os|reforma|placas?\s*solares?)/i.test(message);
+    const isOption4 = messageUpper === '4' || /^4\.?\s*(\?|n[ãa]o\s*sei|não sei ainda)/i.test(message) || 
+                      /n[ãa]o\s*sei\s*(ainda|qual|o\s*que)/i.test(message);
+
+    // Tratar opção 1 - Carro
+    if (isOption1) {
+      sessionService.updateSession(phone, {
+        consortiumType: 'CARRO',
+        state: 'AWAITING_DATA',
+        originalMessage: message
+      });
+      await whatsappService.requestCarData(phone, message);
+      return;
+    }
+
+    // Tratar opção 2 - Imóvel
+    if (isOption2) {
+      sessionService.updateSession(phone, {
+        consortiumType: 'IMOVEL',
+        state: 'AWAITING_DATA',
+        originalMessage: message
+      });
+      await whatsappService.requestPropertyData(phone);
+      return;
+    }
+
+    // Tratar opção 3 - Serviços
+    if (isOption3) {
+      // Serviços não são automatizados - encaminhar para humano
+      await this.requestHumanConfirmation(phone, 'Solicitação de consórcio de serviços (reforma, placas solares, etc.)', {
+        message: message,
+        consortiumType: 'SERVICOS'
+      }, session);
+      return;
+    }
+
+    // Tratar opção 4 - Não sei ainda
+    if (isOption4) {
+      // Cliente não sabe qual tipo - responder conversacionalmente e oferecer ajuda
+      const preferredLanguage = session.preferredLanguage || 'pt';
+      const response = preferredLanguage === 'en'
+        ? `🤔 No problem! I'm here to help you understand the different types of consortium we offer.\n\n` +
+          `We have:\n` +
+          `• *Car Consortium* - For purchasing vehicles\n` +
+          `• *Property Consortium* - For purchasing real estate\n` +
+          `• *Services Consortium* - For renovations, solar panels, and other services\n\n` +
+          `Would you like to know more about any of these options? Or if you prefer, I can connect you with one of our consultants who can help you choose the best option for your needs.`
+        : `🤔 Sem problema! Estou aqui para te ajudar a entender os diferentes tipos de consórcio que oferecemos.\n\n` +
+          `Temos:\n` +
+          `• *Consórcio de Carro* - Para compra de veículos\n` +
+          `• *Consórcio de Imóvel* - Para compra de imóveis\n` +
+          `• *Consórcio de Serviços* - Para reformas, placas solares e outros serviços\n\n` +
+          `Gostaria de saber mais sobre alguma dessas opções? Ou se preferir, posso te conectar com um de nossos consultores que pode te ajudar a escolher a melhor opção para suas necessidades.`;
+      
+      await whatsappService.sendMessage(phone, response);
+      sessionService.addToHistory(phone, response, 'bot');
+      sessionService.updateSession(phone, { 
+        state: 'CONVERSATIONAL'
+      });
       return;
     }
 

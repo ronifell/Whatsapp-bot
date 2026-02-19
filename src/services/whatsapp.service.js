@@ -11,6 +11,7 @@ class WhatsAppService {
     this.baseUrl = config.zapi.baseUrl;
     this.instanceId = config.zapi.instanceId;
     this.token = config.zapi.token;
+    this.clientToken = config.zapi.clientToken; // Client-Token (se configurado)
     this.apiUrl = `${this.baseUrl}/instances/${this.instanceId}/token/${this.token}`;
   }
 
@@ -30,9 +31,100 @@ class WhatsAppService {
 
   /**
    * Verifica se o phone é de um usuário frontend
+   * Apenas números que começam com 'frontend-' são tratados como frontend
    */
   isFrontendUser(phone) {
-    return phone && (phone.startsWith('frontend-') || this.isFrontendMode());
+    return phone && phone.startsWith('frontend-');
+  }
+
+  /**
+   * Valida se o Client-Token é válido (deve ser diferente do token regular)
+   */
+  isValidClientToken() {
+    return this.clientToken && 
+           this.clientToken !== this.token && 
+           this.clientToken.trim().length > 0;
+  }
+
+  /**
+   * Faz uma requisição POST para a API Z-API com tratamento de Client-Token
+   * A instância Z-API pode exigir Client-Token configurado no painel
+   */
+  async makeApiRequest(endpoint, data, options = {}) {
+    const isValidClientToken = this.isValidClientToken();
+    
+    // Preparar headers (adicionar Client-Token apenas se válido)
+    const requestConfig = { ...options };
+    if (isValidClientToken) {
+      if (!requestConfig.headers) {
+        requestConfig.headers = {};
+      }
+      requestConfig.headers['Client-Token'] = this.clientToken;
+    }
+    
+    try {
+      const response = await axios.post(`${this.apiUrl}/${endpoint}`, data, requestConfig);
+      return response;
+    } catch (error) {
+      // Verificar se o erro é relacionado a Client-Token
+      const isClientTokenError = error.response?.data?.error?.includes('client-token is not configured') || 
+                                 error.response?.data?.error?.includes('client-token');
+      
+      if (isClientTokenError) {
+        // Se estávamos usando Client-Token mas ainda deu erro, pode ser que:
+        // 1. O Client-Token no .env não corresponde ao configurado no painel
+        // 2. O Client-Token não está configurado no painel Z-API
+        if (isValidClientToken) {
+          console.error('\n❌ ERRO: Client-Token configurado no .env mas não reconhecido pela API Z-API');
+          console.error('📋 POSSÍVEIS CAUSAS:');
+          console.error('   1. O Client-Token no .env não corresponde ao configurado no painel Z-API');
+          console.error('   2. O Client-Token não foi configurado no painel Z-API');
+          console.error('   3. O Client-Token foi configurado incorretamente no painel\n');
+        } else {
+          // Client-Token não está configurado no .env
+          console.error('\n❌ ERRO: Esta instância Z-API exige Client-Token configurado');
+        }
+        
+        this.logClientTokenInstructions();
+        
+        // Não tentar retry - se a API exige Client-Token, não vai funcionar sem ele
+        throw error;
+      }
+      
+      // Outro tipo de erro, apenas lançar
+      throw error;
+    }
+  }
+
+  /**
+   * Exibe instruções para configurar o Client-Token
+   */
+  logClientTokenInstructions() {
+    console.error('\n⚠️  ERRO: Client-Token não configurado corretamente no Z-API');
+    console.error('📋 SOLUÇÃO PASSO A PASSO:');
+    console.error('');
+    console.error('   PASSO 1: Configure no Painel Z-API');
+    console.error('   1. Acesse: https://www.z-api.io');
+    console.error('   2. Faça login na sua conta');
+    console.error('   3. Vá até a sua instância (ID: ' + (this.instanceId || 'N/A') + ')');
+    console.error('   4. Procure por "Client-Token" ou "Token de Cliente" nas configurações');
+    console.error('   5. Configure um Client-Token (pode gerar um novo ou usar um existente)');
+    console.error('   6. ANOTE o valor do Client-Token configurado');
+    console.error('');
+    console.error('   PASSO 2: Configure no arquivo .env');
+    console.error('   7. Abra o arquivo .env na raiz do projeto');
+    console.error('   8. Adicione ou atualize a linha:');
+    console.error('      ZAPI_CLIENT_TOKEN=valor_do_client_token_do_painel');
+    console.error('   9. Certifique-se de que o Client-Token é DIFERENTE do ZAPI_TOKEN');
+    console.error('   10. Salve o arquivo .env');
+    console.error('');
+    console.error('   PASSO 3: Reinicie o servidor');
+    console.error('   11. Pare o servidor (Ctrl+C)');
+    console.error('   12. Execute: npm start');
+    console.error('');
+    console.error('💡 DICA: O Client-Token é um token de segurança adicional');
+    console.error('   Ele deve ser configurado PRIMEIRO no painel Z-API,');
+    console.error('   e depois adicionado no .env com o MESMO valor.\n');
   }
 
   /**
@@ -68,7 +160,20 @@ class WhatsAppService {
       console.log(`💬 Mensagem:\n${message}`);
       console.log('═'.repeat(70) + '\n');
 
-      const response = await axios.post(`${this.apiUrl}/send-text`, {
+      // Log da URL e token para debug (sem expor o token completo)
+      console.log(`🔍 Debug: API URL: ${this.apiUrl}/send-text`);
+      console.log(`🔍 Debug: Token configurado: ${this.token ? this.token.substring(0, 8) + '...' : 'NÃO CONFIGURADO'}`);
+      const hasValidClientToken = this.isValidClientToken();
+      console.log(`🔍 Debug: Client-Token configurado: ${hasValidClientToken ? 'SIM' : 'NÃO'}`);
+      if (this.clientToken && !hasValidClientToken) {
+        console.warn('⚠️  AVISO: Client-Token no .env é inválido (igual ao token regular ou vazio)');
+        console.warn('   A instância Z-API pode exigir Client-Token configurado no painel');
+      } else if (!this.clientToken) {
+        console.warn('⚠️  AVISO: Client-Token não configurado no .env');
+        console.warn('   Se a instância Z-API exigir Client-Token, configure-o no painel e no .env');
+      }
+      
+      const response = await this.makeApiRequest('send-text', {
         phone: phone,
         message: message
       });
@@ -114,7 +219,7 @@ class WhatsAppService {
       console.log(`💬 Mensagem:\n${message}`);
       console.log('═'.repeat(70) + '\n');
 
-      const response = await axios.post(`${this.apiUrl}/send-text`, {
+      const response = await this.makeApiRequest('send-text', {
         phone: phone,
         message: message
       });
@@ -150,7 +255,7 @@ class WhatsAppService {
         return { success: true, testMode: true };
       }
 
-      const response = await axios.post(`${this.apiUrl}/send-document`, {
+      const response = await this.makeApiRequest('send-document', {
         phone: phone,
         document: documentUrl,
         fileName: fileName
@@ -187,7 +292,7 @@ class WhatsAppService {
         return { success: true, testMode: true };
       }
 
-      const response = await axios.post(`${this.apiUrl}/send-image`, {
+      const response = await this.makeApiRequest('send-image', {
         phone: phone,
         image: imageUrl,
         caption: caption
@@ -239,6 +344,27 @@ Sou seu assistente virtual e estou aqui para ajudar com tudo sobre consórcio.
 Posso responder suas dúvidas sobre consórcio de automóvel, imóvel, ou outros tipos. E quando você estiver pronto, também posso gerar uma cotação personalizada para você.
 
 Como posso te ajudar hoje? 😊`;
+
+    return this.sendMessage(phone, message);
+  }
+
+  /**
+   * Envia mensagem inicial com opções de consórcio (primeira mensagem do cliente)
+   */
+  async sendFirstMessageWithOptions(phone) {
+    const message = `Oi! 👋 Sou o Bot da CotaFácil Alphaville. Eu faço sua simulação completa e já te devolvo cotação.
+
+Você quer consórcio de:
+
+1. 🚗 Carro
+
+2. 🏠 Imóvel
+
+3. 🔧 Serviços (reforma, placas solares etc.)
+
+4. ❓ Não sei ainda
+
+Vai para OBJETIVO`;
 
     return this.sendMessage(phone, message);
   }
@@ -404,7 +530,7 @@ Como deseja prosseguir?`;
     return this.sendMessage(phone, message);
   }
 
-  async forwardToHuman(phone, reason, customerData) {
+  async forwardToHuman(phone, reason, customerData, preferredLanguage = 'pt') {
     const adminNumber = config.whatsapp.adminNumber;
     
     const messageToAdmin = `🔔 *Novo Atendimento Humano Necessário*
@@ -428,12 +554,23 @@ Por favor, entre em contato com o cliente.`;
       await this.sendMessage(adminNumber, messageToAdmin);
     }
 
-    const messageToCustomer = `👨‍💼 *Encaminhando para Atendimento Especializado*
+    const messageToCustomer = preferredLanguage === 'en'
+      ? `👨‍💼 *Forwarding to Specialized Support*
+
+Your request has been forwarded to one of our consultants.
+You will be contacted shortly to continue the service.
+
+Thank you for your preference! 😊
+
+🤖 If you need my help in the future, please tell me you want to talk to the bot again.`
+      : `👨‍💼 *Encaminhando para Atendimento Especializado*
 
 Sua solicitação foi encaminhada para um de nossos consultores.
 Em breve você será contatado para dar continuidade ao atendimento.
 
-Obrigado pela preferência! 😊`;
+Obrigado pela preferência! 😊
+
+🤖 Se precisar da minha ajuda no futuro, por favor, me diga que quer falar com o bot novamente.`;
 
     return this.sendMessage(phone, messageToCustomer);
   }

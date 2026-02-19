@@ -7,6 +7,7 @@ export const config = {
   zapi: {
     instanceId: process.env.ZAPI_INSTANCE_ID,
     token: process.env.ZAPI_TOKEN,
+    clientToken: process.env.ZAPI_CLIENT_TOKEN, // Client-Token configurado no dashboard (opcional)
     baseUrl: process.env.ZAPI_BASE_URL || 'https://api.z-api.io'
   },
 

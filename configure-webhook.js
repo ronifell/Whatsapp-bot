@@ -82,63 +82,124 @@ async function configureWebhook() {
     
     for (const endpoint of endpoints) {
       try {
+        const fullUrl = `${apiUrl}${endpoint.path}`;
         console.log(`🔄 Tentando: ${endpoint.name}...`);
+        console.log(`   📍 URL: ${fullUrl}`);
+        console.log(`   📤 Método: ${endpoint.method.toUpperCase()}`);
+        console.log(`   📦 Payload: ${JSON.stringify(endpoint.payload)}`);
         
         // Usar o método HTTP apropriado
         if (endpoint.method === 'put') {
-          response = await axios.put(`${apiUrl}${endpoint.path}`, endpoint.payload);
+          response = await axios.put(fullUrl, endpoint.payload);
         } else {
-          response = await axios.post(`${apiUrl}${endpoint.path}`, endpoint.payload);
+          response = await axios.post(fullUrl, endpoint.payload);
         }
         
         // Verificar se a resposta contém erro mesmo com status 200
         if (hasError(response)) {
-          console.log(`⚠️  ${endpoint.name} retornou erro na resposta`);
+          console.log(`   ⚠️  Retornou erro na resposta`);
+          console.log(`   📊 Status: ${response.status}`);
+          console.log(`   📋 Resposta: ${JSON.stringify(response.data, null, 2)}`);
           lastError = new Error(response.data.message || response.data.error || 'Erro desconhecido na resposta');
+          lastError.response = response;
+          console.log(''); // Linha em branco
           continue; // Tentar próximo endpoint
         }
         
         // Sucesso!
         successEndpoint = endpoint.name;
+        console.log(`   ✅ Sucesso!`);
+        console.log(`   📊 Status: ${response.status}`);
+        console.log(`   📋 Resposta: ${JSON.stringify(response.data, null, 2)}`);
         console.log(`✅ Webhook configurado usando ${endpoint.name}\n`);
         break;
         
       } catch (error) {
+        const statusCode = error.response?.status;
+        const responseData = error.response?.data;
+        const errorMessage = error.response?.data?.message || error.response?.data?.error || error.message;
+        
+        console.log(`   ❌ Falhou:`);
+        console.log(`      📊 Status: ${statusCode || 'N/A'}`);
+        console.log(`      📝 Mensagem: ${errorMessage}`);
+        
+        if (responseData && Object.keys(responseData).length > 0) {
+          console.log(`      📋 Resposta completa:`);
+          console.log(`         ${JSON.stringify(responseData, null, 2).split('\n').join('\n         ')}`);
+        }
+        console.log(''); // Linha em branco
+        
         // Se for 404, tentar próximo endpoint
-        if (error.response?.status === 404) {
-          console.log(`⚠️  ${endpoint.name} não encontrado (404), tentando próximo...`);
+        if (statusCode === 404) {
           lastError = error;
           continue;
         }
         
         // Se for outro erro HTTP, verificar se tem erro na resposta
         if (error.response && hasError(error.response)) {
-          console.log(`⚠️  ${endpoint.name} retornou erro`);
           lastError = error;
           continue;
         }
         
         // Se for 405 (Method Not Allowed), tentar próximo
-        if (error.response?.status === 405) {
-          console.log(`⚠️  ${endpoint.name} método não permitido (405), tentando próximo...`);
+        if (statusCode === 405) {
           lastError = error;
           continue;
         }
         
-        // Erro não esperado, lançar
+        // Se for 400, 401, 403, 500+, salvar e continuar
+        if (statusCode >= 400 && statusCode < 600) {
+          lastError = error;
+          continue;
+        }
+        
+        // Erro não esperado (rede, timeout, etc), lançar
         throw error;
       }
     }
     
     // Verificar se algum endpoint funcionou
     if (!successEndpoint) {
-      console.error('\n❌ Nenhum endpoint funcionou. Todos os endpoints retornaram erro.');
+      console.error('\n' + '═'.repeat(70));
+      console.error('❌ NENHUM ENDPOINT FUNCIONOU');
+      console.error('═'.repeat(70));
+      console.error('\n📊 Resumo das tentativas:');
+      console.error(`   • Total de endpoints testados: ${endpoints.length}`);
+      
       if (lastError?.response) {
-        console.error(`📊 Status HTTP: ${lastError.response.status}`);
-        console.error('📋 Resposta da API:');
-        console.error(JSON.stringify(lastError.response.data, null, 2));
+        const statusCode = lastError.response.status;
+        const responseData = lastError.response.data;
+        console.error(`\n📋 Última resposta recebida:`);
+        console.error(`   • Status HTTP: ${statusCode}`);
+        console.error(`   • URL testada: ${apiUrl}${endpoints[endpoints.length - 1]?.path || 'N/A'}`);
+        
+        if (responseData) {
+          console.error(`   • Resposta completa:`);
+          console.error(JSON.stringify(responseData, null, 2).split('\n').map(line => `      ${line}`).join('\n'));
+        }
+        
+        // Análise específica por status code
+        if (statusCode === 401) {
+          console.error(`\n💡 Status 401 (Não Autorizado):`);
+          console.error(`   • Token ou Instance ID podem estar incorretos`);
+          console.error(`   • Verifique ZAPI_TOKEN e ZAPI_INSTANCE_ID no arquivo .env`);
+        } else if (statusCode === 404) {
+          console.error(`\n💡 Status 404 (Não Encontrado):`);
+          console.error(`   • O endpoint pode não existir nesta versão da Z-API`);
+          console.error(`   • Verifique a documentação: https://developer.z-api.io/`);
+        } else if (statusCode === 400) {
+          console.error(`\n💡 Status 400 (Requisição Inválida):`);
+          console.error(`   • A URL do webhook pode estar em formato incorreto`);
+          console.error(`   • Verifique se a URL começa com http:// ou https://`);
+        } else if (statusCode === 405) {
+          console.error(`\n💡 Status 405 (Método Não Permitido):`);
+          console.error(`   • O método HTTP pode estar incorreto`);
+          console.error(`   • A API pode exigir configuração manual no painel`);
+        }
       } else if (lastError) {
-        console.error('📋 Erro:', lastError.message);
+        console.error(`\n📋 Último erro capturado:`);
+        console.error(`   • Mensagem: ${lastError.message}`);
+        console.error(`   • Tipo: ${lastError.name || 'Erro desconhecido'}`);
       }
       
       console.error('\n' + '═'.repeat(70));

@@ -38,11 +38,18 @@ app.get('/', (req, res) => {
  */
 app.post('/webhook', async (req, res) => {
   try {
-    const { phone, message, instanceId } = req.body;
+    const { phone, message, text, instanceId, type, status } = req.body;
     const timestamp = new Date().toLocaleString('pt-BR');
 
-    // Validar dados básicos
-    if (!phone || !message) {
+    // Ignorar callbacks de status (MessageStatusCallback)
+    // Estes são eventos de status (READ, SENT, RECEIVED, etc.) e não mensagens reais
+    if (type === 'MessageStatusCallback') {
+      // Retornar 200 silenciosamente - estes são eventos válidos, apenas não precisam ser processados
+      return res.status(200).json({ status: 'ignored', reason: 'status_callback' });
+    }
+
+    // Validar dados básicos - aceitar phone e (message OU text)
+    if (!phone || (!message && !text)) {
       console.warn('⚠️ Webhook inválido: falta phone ou message');
       console.warn('📋 Body recebido:', JSON.stringify(req.body, null, 2));
       return res.status(400).json({ error: 'Dados inválidos' });
@@ -55,8 +62,13 @@ app.post('/webhook', async (req, res) => {
     }
 
     // Extrair texto da mensagem de forma robusta
+    // Z-API pode enviar: { text: { message: "..." } } ou { message: "..." }
     let messageText = '';
-    if (typeof message === 'string') {
+    
+    // Primeiro tentar extrair de text.message (formato Z-API)
+    if (text?.message) {
+      messageText = text.message;
+    } else if (typeof message === 'string') {
       messageText = message;
     } else if (message?.text) {
       messageText = message.text;
@@ -66,9 +78,11 @@ app.post('/webhook', async (req, res) => {
       messageText = message.message;
     } else if (message?.content) {
       messageText = message.content;
+    } else if (text?.body) {
+      messageText = text.body;
     } else {
-      console.warn('⚠️ Formato de mensagem desconhecido:', JSON.stringify(message));
-      messageText = JSON.stringify(message);
+      console.warn('⚠️ Formato de mensagem desconhecido:', JSON.stringify(req.body));
+      messageText = JSON.stringify(message || text);
     }
 
     // Ignorar mensagens vazias

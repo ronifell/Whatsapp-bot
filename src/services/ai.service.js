@@ -259,6 +259,122 @@ Responda APENAS com uma das palavras: QUESTION, QUOTE_REQUEST, HUMAN_REQUEST, ou
   }
 
   /**
+   * Detecta se o cliente quer falar com o bot novamente
+   * Retorna: true se detectado, false caso contrário
+   * 
+   * Esta função é flexível e detecta várias formas de expressar a intenção de falar com o bot,
+   * incluindo variações de ortografia, sinônimos (robô, assistente, etc.) e diferentes estruturas de frase.
+   */
+  detectBotRequest(message) {
+    if (!message || typeof message !== 'string') {
+      return false;
+    }
+    
+    const messageLower = message.toLowerCase().trim();
+    
+    // Palavras que indicam o bot/robô/assistente (sinônimos e variações)
+    const botSynonyms = [
+      'bot', 'bots', 'robo', 'robô', 'robos', 'robôs', 'robot', 'robots',
+      'assistente', 'assistentes', 'assistente virtual', 'assistente virtual',
+      'atendente virtual', 'atendente automatizado', 'chatbot', 'chat bot'
+    ];
+    
+    // Palavras que indicam intenção de comunicação/interação
+    const communicationVerbs = [
+      'falar', 'conversar', 'falar com', 'conversar com', 'falar ao', 'conversar ao',
+      'chamar', 'chamar o', 'chamar um', 'falar ao', 'conversar ao',
+      'talk', 'speak', 'talk to', 'speak with', 'chat', 'chat with'
+    ];
+    
+    // Palavras que indicam desejo/solicitação
+    const requestWords = [
+      'quero', 'quer', 'gostaria', 'preciso', 'precisar', 'desejo', 'desejar',
+      'pode', 'poder', 'poderia', 'voltar', 'voltar para', 'voltar ao', 'voltar pro',
+      'want', 'wants', 'would like', 'need', 'needs', 'please', 'again'
+    ];
+    
+    // Verificar padrão: [request word] + [communication verb] + [bot synonym]
+    // Exemplos: "quero conversar com um robô", "quero falar com o bot", "preciso do assistente"
+    const hasRequestPattern = requestWords.some(requestWord => {
+      if (!messageLower.includes(requestWord)) {
+        return false;
+      }
+      
+      // Verificar se há verbo de comunicação
+      const hasCommunicationVerb = communicationVerbs.some(verb => {
+        return messageLower.includes(verb);
+      });
+      
+      // Verificar se há sinônimo de bot
+      const hasBotSynonym = botSynonyms.some(synonym => {
+        // Usar regex para encontrar a palavra completa (não parte de outra palavra)
+        const regex = new RegExp(`\\b${synonym.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+        return regex.test(messageLower);
+      });
+      
+      // Se tem palavra de solicitação E (verbo de comunicação OU sinônimo de bot)
+      // Isso captura tanto "quero bot" quanto "quero conversar com robô"
+      if (hasCommunicationVerb || hasBotSynonym) {
+        return true;
+      }
+      
+      return false;
+    });
+    
+    if (hasRequestPattern) {
+      console.log(`🤖 Detecção de solicitação de bot: padrão de solicitação encontrado em "${message}"`);
+      return true;
+    }
+    
+    // Verificar padrão: [communication verb] + [bot synonym]
+    // Exemplos: "falar com bot", "conversar com robô", "chamar assistente"
+    const hasCommunicationPattern = communicationVerbs.some(verb => {
+      if (!messageLower.includes(verb)) {
+        return false;
+      }
+      
+      // Verificar se há sinônimo de bot próximo ao verbo
+      const hasBotSynonym = botSynonyms.some(synonym => {
+        const regex = new RegExp(`\\b${synonym.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+        return regex.test(messageLower);
+      });
+      
+      return hasBotSynonym;
+    });
+    
+    if (hasCommunicationPattern) {
+      console.log(`🤖 Detecção de solicitação de bot: padrão de comunicação encontrado em "${message}"`);
+      return true;
+    }
+    
+    // Verificar se a mensagem contém sinônimo de bot E é curta (provavelmente uma solicitação direta)
+    // Exemplos: "bot", "robô", "assistente"
+    const hasDirectBotReference = botSynonyms.some(synonym => {
+      const regex = new RegExp(`\\b${synonym.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+      if (regex.test(messageLower)) {
+        // Se a mensagem é curta (menos de 60 caracteres), é provável que seja uma solicitação
+        if (messageLower.length < 60) {
+          // Verificar se não é uma pergunta sobre o bot (ex: "o que é um bot?")
+          const questionWords = ['o que', 'que é', 'o que é', 'what is', 'what\'s', 'como funciona', 'how does', 'explique', 'explain'];
+          const isQuestion = questionWords.some(qWord => messageLower.includes(qWord));
+          if (!isQuestion) {
+            return true;
+          }
+        }
+      }
+      return false;
+    });
+    
+    if (hasDirectBotReference) {
+      console.log(`🤖 Detecção de solicitação de bot: referência direta encontrada em "${message}"`);
+      return true;
+    }
+    
+    console.log(`🔍 Mensagem não detectada como solicitação de bot: "${message}"`);
+    return false;
+  }
+
+  /**
    * Detecta preferência de idioma do usuário na mensagem
    * Retorna: 'en', 'pt', ou null se não detectado
    */

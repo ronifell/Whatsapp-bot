@@ -11,7 +11,7 @@ echo.
 
 curl -X POST http://localhost:3000/webhook ^
   -H "Content-Type: application/json" ^
-  -d "{\"phone\": \"5511999484829\", \"message\": {\"text\": \"Teste do webhook\"}, \"instanceId\": \"3ED53E69CF90C19ADB44D66739CEE648\"}"
+  -d "{\"phone\": \"5511999999999\", \"message\": {\"text\": \"Teste do webhook\"}, \"instanceId\": \"3ED53E69CF90C19ADB44D66739CEE648\"}"
 
 echo.
 echo.
