@@ -371,6 +371,24 @@ Vai para OBJETIVO`;
   }
 
   /**
+   * Envia apenas as opções de tipos de consórcio (sem introdução completa)
+   * Usado quando cliente pergunta sobre orçamento/cotação durante a conversa
+   */
+  async sendConsortiumTypeOptions(phone) {
+    const message = `Você quer consórcio de:
+
+1. 🚗 Carro
+
+2. 🏠 Imóvel
+
+3. 🔧 Serviços (reforma, placas solares etc.)
+
+4. ❓ Não sei ainda`;
+
+    return this.sendMessage(phone, message);
+  }
+
+  /**
    * Solicita dados do cliente para automóvel/veículo
    * @param {string} phone - Número do telefone
    * @param {string} originalMessage - Mensagem original do cliente (opcional, para detectar tipo específico)

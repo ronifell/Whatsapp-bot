@@ -42,6 +42,27 @@ class OrchestratorService {
         return;
       }
 
+      // VERIFICAÇÃO GLOBAL PRIORITÁRIA: Orçamento/Cotação de Consórcio
+      // Esta verificação deve ser feita ANTES de qualquer processamento de estado
+      // para garantir que sempre mostre as opções quando detectar orçamento/cotação
+      const messageLower = message.toLowerCase();
+      const hasBudgetKeywords = /(orçamento|orcamento|orçar|orcar|cotar|cotação|quanto|valor|preço|simular|simulação)/i.test(message);
+      const hasConsortiumKeywords = /(consórcio|consorcio)/i.test(message);
+      
+      if (hasBudgetKeywords && hasConsortiumKeywords) {
+        // Cliente está perguntando sobre orçamento/cotação de consórcio - SEMPRE mostrar opções de tipos
+        console.log('🔍 [VERIFICAÇÃO GLOBAL] Detectada menção a orçamento/cotação de consórcio - mostrando opções de tipos (prioridade máxima)');
+        console.log(`   Mensagem: "${message}"`);
+        console.log(`   Estado atual: ${session.state}`);
+        await whatsappService.sendConsortiumTypeOptions(phone);
+        sessionService.addToHistory(phone, 
+          'Você quer consórcio de:\n\n1. 🚗 Carro\n\n2. 🏠 Imóvel\n\n3. 🔧 Serviços (reforma, placas solares etc.)\n\n4. ❓ Não sei ainda',
+          'bot'
+        );
+        sessionService.updateSession(phone, { state: 'AWAITING_TYPE' });
+        return;
+      }
+
       // Se já foi encaminhado para humano, verificar se cliente quer falar com bot novamente
       if (session.state === 'FORWARDED_TO_HUMAN') {
         console.log(`🔍 Verificando se cliente ${phone} quer falar com bot. Mensagem: "${message}"`);
@@ -334,6 +355,24 @@ class OrchestratorService {
       return;
     }
 
+    // PRIORIDADE 1: Verificar se a mensagem menciona orçamento/cotação de consórcio
+    // Isso deve ser verificado ANTES de qualquer outra detecção para garantir que sempre mostre as opções
+    const messageLower = message.toLowerCase();
+    const hasBudgetKeywords = /(orçamento|orcamento|orçar|orcar|cotar|cotação|quanto|valor|preço|simular|simulação)/i.test(message);
+    const hasConsortiumKeywords = /(consórcio|consorcio)/i.test(message);
+    
+    if (hasBudgetKeywords && hasConsortiumKeywords) {
+      // Cliente está perguntando sobre orçamento/cotação de consórcio - SEMPRE mostrar opções de tipos
+      console.log('✅ Detectada menção a orçamento/cotação de consórcio - mostrando opções de tipos (prioridade alta)');
+      await whatsappService.sendConsortiumTypeOptions(phone);
+      sessionService.addToHistory(phone, 
+        'Você quer consórcio de:\n\n1. 🚗 Carro\n\n2. 🏠 Imóvel\n\n3. 🔧 Serviços (reforma, placas solares etc.)\n\n4. ❓ Não sei ainda',
+        'bot'
+      );
+      sessionService.updateSession(phone, { state: 'AWAITING_TYPE' });
+      return;
+    }
+
     // 1. Detectar intenção do usuário
     const intent = await aiService.detectUserIntent(message, session.history || []);
 
@@ -349,12 +388,16 @@ class OrchestratorService {
       // Cliente está explicitamente solicitando uma cotação
       const classification = await aiService.classifyConsortiumType(message);
       
-      if (classification === 'OUTROS') {
-        // Cotação para outros tipos - solicitar confirmação para conectar ao humano
-        await this.requestHumanConfirmation(phone, 'Solicitação de cotação para tipo não automatizado', {
-          message: message,
-          consortiumType: classification
-        }, session);
+      // Se classification é OUTROS ou não detectado, mostrar opções ao invés de encaminhar para humano
+      if (classification === 'OUTROS' || !classification) {
+        // Mostrar opções de tipos ao invés de encaminhar para humano
+        console.log('✅ Solicitação de cotação detectada mas tipo não específico ou OUTROS - mostrando opções');
+        await whatsappService.sendConsortiumTypeOptions(phone);
+        sessionService.addToHistory(phone, 
+          'Você quer consórcio de:\n\n1. 🚗 Carro\n\n2. 🏠 Imóvel\n\n3. 🔧 Serviços (reforma, placas solares etc.)\n\n4. ❓ Não sei ainda',
+          'bot'
+        );
+        sessionService.updateSession(phone, { state: 'AWAITING_TYPE' });
         return;
       }
 
@@ -396,6 +439,16 @@ class OrchestratorService {
         }
         return;
       }
+
+      // QUOTE_REQUEST mas tipo não detectado ou não específico - mostrar opções de tipos
+      console.log('✅ Solicitação de cotação detectada mas tipo não específico - mostrando opções');
+      await whatsappService.sendConsortiumTypeOptions(phone);
+      sessionService.addToHistory(phone, 
+        'Você quer consórcio de:\n\n1. 🚗 Carro\n\n2. 🏠 Imóvel\n\n3. 🔧 Serviços (reforma, placas solares etc.)\n\n4. ❓ Não sei ainda',
+        'bot'
+      );
+      sessionService.updateSession(phone, { state: 'AWAITING_TYPE' });
+      return;
     }
 
     // QUESTION ou OTHER - responder conversacionalmente
@@ -436,6 +489,24 @@ class OrchestratorService {
    * Trata estado conversacional - responde perguntas e detecta mudanças de intenção
    */
   async handleConversationalState(phone, message, session) {
+    // PRIORIDADE 1: Verificar se a mensagem menciona orçamento/cotação de consórcio
+    // Isso deve ser verificado ANTES de qualquer outra detecção para garantir que sempre mostre as opções
+    const messageLower = message.toLowerCase();
+    const hasBudgetKeywords = /(orçamento|orcamento|orçar|orcar|cotar|cotação|quanto|valor|preço|simular|simulação)/i.test(message);
+    const hasConsortiumKeywords = /(consórcio|consorcio)/i.test(message);
+    
+    if (hasBudgetKeywords && hasConsortiumKeywords) {
+      // Cliente está perguntando sobre orçamento/cotação de consórcio - SEMPRE mostrar opções de tipos
+      console.log('✅ Detectada menção a orçamento/cotação de consórcio no estado conversacional - mostrando opções de tipos (prioridade alta)');
+      await whatsappService.sendConsortiumTypeOptions(phone);
+      sessionService.addToHistory(phone, 
+        'Você quer consórcio de:\n\n1. 🚗 Carro\n\n2. 🏠 Imóvel\n\n3. 🔧 Serviços (reforma, placas solares etc.)\n\n4. ❓ Não sei ainda',
+        'bot'
+      );
+      sessionService.updateSession(phone, { state: 'AWAITING_TYPE' });
+      return;
+    }
+
     // Detectar intenção atual
     const intent = await aiService.detectUserIntent(message, session.history || []);
 
@@ -452,12 +523,16 @@ class OrchestratorService {
       // Cliente agora quer cotar - processar solicitação
       const classification = await aiService.classifyConsortiumType(message);
       
-      if (classification === 'OUTROS') {
-        // Cotação para outros tipos - solicitar confirmação para conectar ao humano
-        await this.requestHumanConfirmation(phone, 'Solicitação de cotação para tipo não automatizado', {
-          message: message,
-          consortiumType: classification
-        }, session);
+      // Se classification é OUTROS ou não detectado, mostrar opções ao invés de encaminhar para humano
+      if (classification === 'OUTROS' || !classification) {
+        // Mostrar opções de tipos ao invés de encaminhar para humano
+        console.log('✅ Solicitação de cotação detectada mas tipo não específico ou OUTROS - mostrando opções');
+        await whatsappService.sendConsortiumTypeOptions(phone);
+        sessionService.addToHistory(phone, 
+          'Você quer consórcio de:\n\n1. 🚗 Carro\n\n2. 🏠 Imóvel\n\n3. 🔧 Serviços (reforma, placas solares etc.)\n\n4. ❓ Não sei ainda',
+          'bot'
+        );
+        sessionService.updateSession(phone, { state: 'AWAITING_TYPE' });
         return;
       }
 
@@ -497,6 +572,16 @@ class OrchestratorService {
         }
         return;
       }
+
+      // QUOTE_REQUEST mas tipo não detectado ou não específico - mostrar opções de tipos
+      console.log('✅ Solicitação de cotação detectada mas tipo não específico no estado conversacional - mostrando opções');
+      await whatsappService.sendConsortiumTypeOptions(phone);
+      sessionService.addToHistory(phone, 
+        'Você quer consórcio de:\n\n1. 🚗 Carro\n\n2. 🏠 Imóvel\n\n3. 🔧 Serviços (reforma, placas solares etc.)\n\n4. ❓ Não sei ainda',
+        'bot'
+      );
+      sessionService.updateSession(phone, { state: 'AWAITING_TYPE' });
+      return;
     }
 
     // QUESTION ou OTHER - continuar conversação

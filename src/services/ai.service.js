@@ -223,16 +223,17 @@ Mensagem atual do cliente: "${message}"
 
 Analise a mensagem e determine a intenção principal:
 - QUESTION: Cliente está fazendo uma pergunta, querendo informações, esclarecimentos sobre consórcio, produtos, processos, etc. Exemplos: "O que é consórcio?", "Como funciona?", "Quais são as taxas?", "Qual a diferença entre consórcio de carro e imóvel?"
-- QUOTE_REQUEST: Cliente está explicitamente solicitando uma cotação, pedindo para fazer uma cotação, querendo valores, querendo cotar, pedindo outra cotação com valores diferentes, OU enviando dados completos de cotação (Valor, Prazo, Nome, CPF, Data Nascimento, Email). Exemplos: "Quero cotar um carro", "Fazer uma cotação", "Preciso de uma cotação de imóvel", "Quanto custa para X valor em Y meses", "Quero outra cotação de 50 mil", "E se fosse 30 mil?", "Cotação para 100 mil", mensagens que contêm "Valor: R$ X", "Prazo: Y meses", "Nome:", "CPF:", "Data Nascimento:", "Email:"
+- QUOTE_REQUEST: Cliente está explicitamente solicitando uma cotação, pedindo para fazer uma cotação, querendo valores, querendo cotar, pedindo outra cotação com valores diferentes, OU enviando dados completos de cotação (Valor, Prazo, Nome, CPF, Data Nascimento, Email). Exemplos: "Quero cotar um carro", "Fazer uma cotação", "Preciso de uma cotação de imóvel", "Quanto custa para X valor em Y meses", "Quero outra cotação de 50 mil", "E se fosse 30 mil?", "Cotação para 100 mil", mensagens que contêm "Valor: R$ X", "Prazo: Y meses", "Nome:", "CPF:", "Data Nascimento:", "Email:". IMPORTANTE: Mensagens que perguntam sobre orçamento, valor, preço ou cotação de consórcio (mesmo que formuladas como pergunta) devem ser classificadas como QUOTE_REQUEST. Exemplos: "Gostaria de saber qual é o orçamento do consórcio", "Qual o valor do consórcio?", "Quanto custa um consórcio?", "Quero saber o preço do consórcio"
 - HUMAN_REQUEST: Cliente quer falar com um humano, atendente, consultor. Exemplos: "Quero falar com alguém", "Atendimento humano", "Consultor", "Falar com atendente", "Quero falar com um humano"
 - OTHER: Outras intenções não categorizadas
 
 IMPORTANTE: 
-- Perguntas sobre consórcio devem ser classificadas como QUESTION, mesmo que mencionem tipos específicos
+- Perguntas informativas sobre consórcio (como funciona, o que é, etc.) devem ser classificadas como QUESTION
+- Solicitações de cotação, orçamento, valor ou preço de consórcio (mesmo que formuladas como pergunta) devem ser QUOTE_REQUEST. Exemplos: "Gostaria de saber qual é o orçamento do consórcio", "Qual o valor do consórcio?", "Quanto custa um consórcio?"
 - Solicitações de cotação (incluindo segundas, terceiras cotações com valores diferentes) devem ser QUOTE_REQUEST
 - Se a mensagem contém dados estruturados de cotação (Valor, Prazo, Nome, CPF, Data Nascimento, Email), SEMPRE classifique como QUOTE_REQUEST, mesmo que seja uma nova cotação após uma anterior
 - Se o cliente pedir uma nova cotação com valores diferentes, classifique como QUOTE_REQUEST
-- Se a mensagem for uma pergunta informativa, SEMPRE classifique como QUESTION
+- Se a mensagem for uma pergunta informativa sobre conceitos/processos, classifique como QUESTION
 - Apenas quando o cliente EXPLICITAMENTE pedir para falar com humano, classifique como HUMAN_REQUEST
 - NUNCA classifique como HUMAN_REQUEST se a mensagem contém dados de cotação ou parece ser uma solicitação de cotação
 
@@ -448,6 +449,8 @@ Your role is:
 - Vary your responses naturally (like a real human would)
 - DO NOT offer quotes unless explicitly requested by the customer
 - DO NOT assume the customer wants a quote when they are just asking questions
+- NEVER suggest connecting to a human consultant or counselor unless the customer explicitly asks for it
+- NEVER offer to connect to a consultant when the customer asks about budget, price, quote, or value of consortium
 
 ${languageInstruction}
 
@@ -462,6 +465,7 @@ Generate a natural, conversational, and helpful response. The response should:
 - Be informative and clear
 - Vary in style (not always the same)
 - If appropriate, mention that you can help with quotes when the customer wants, but without pressuring
+- NEVER suggest connecting to a consultant
 
 Response (in English):`
         : `Você é um assistente virtual especializado em consórcio para a empresa CotaFácil Alphaville.
@@ -473,6 +477,8 @@ Sua função é:
 - Variar suas respostas naturalmente (como em uma conversa humana real)
 - NÃO oferecer cotações a menos que explicitamente solicitado pelo cliente
 - NÃO assumir que o cliente quer cotar quando ele está apenas perguntando
+- NUNCA sugerir conectar com consultor humano a menos que o cliente explicitamente peça
+- NUNCA oferecer conectar com consultor quando o cliente perguntar sobre orçamento, preço, cotação ou valor de consórcio
 
 ${languageInstruction}
 
@@ -487,6 +493,7 @@ Gere uma resposta natural, conversacional e útil. A resposta deve:
 - Ser informativa e clara
 - Variar no estilo (não sempre igual)
 - Se apropriado, mencionar que você pode ajudar com cotações quando o cliente quiser, mas sem pressionar
+- NUNCA sugerir conectar com consultor
 
 Resposta (em português brasileiro):`;
 
