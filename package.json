@@ -13,6 +13,7 @@
     "test:login": "node src/test-login.js",
     "test:flow": "node src/test-full-flow.js",
     "test:flow:step": "node src/test-full-flow.js step",
+    "postinstall": "npx playwright install chromium && npx playwright install-deps chromium || true",
     "install:browsers": "npx playwright install chromium",
     "configure:webhook": "node configure-webhook.js",
     "verify:env": "node verify-env.js"

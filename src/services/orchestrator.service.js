@@ -45,20 +45,28 @@ class OrchestratorService {
       // VERIFICAÇÃO GLOBAL PRIORITÁRIA: Orçamento/Cotação de Consórcio
       // Esta verificação deve ser feita ANTES de qualquer processamento de estado
       // para garantir que sempre mostre as opções quando detectar orçamento/cotação
+      // Suporta tanto português quanto inglês
       const messageLower = message.toLowerCase();
-      const hasBudgetKeywords = /(orçamento|orcamento|orçar|orcar|cotar|cotação|quanto|valor|preço|simular|simulação)/i.test(message);
-      const hasConsortiumKeywords = /(consórcio|consorcio)/i.test(message);
+      const hasBudgetKeywords = /(orçamento|orcamento|orçar|orcar|cotar|cotação|quanto|valor|preço|simular|simulação|quote|quotation|budget|price|value|cost|how much|simulate|simulation)/i.test(message);
+      const hasConsortiumKeywords = /(consórcio|consorcio|consortium)/i.test(message);
       
       if (hasBudgetKeywords && hasConsortiumKeywords) {
         // Cliente está perguntando sobre orçamento/cotação de consórcio - SEMPRE mostrar opções de tipos
         console.log('🔍 [VERIFICAÇÃO GLOBAL] Detectada menção a orçamento/cotação de consórcio - mostrando opções de tipos (prioridade máxima)');
         console.log(`   Mensagem: "${message}"`);
         console.log(`   Estado atual: ${session.state}`);
-        await whatsappService.sendConsortiumTypeOptions(phone);
-        sessionService.addToHistory(phone, 
-          'Você quer consórcio de:\n\n1. 🚗 Carro\n\n2. 🏠 Imóvel\n\n3. 🔧 Serviços (reforma, placas solares etc.)\n\n4. ❓ Não sei ainda',
-          'bot'
-        );
+        
+        // Detectar idioma preferido da sessão ou da mensagem
+        const preferredLanguage = session.preferredLanguage || 
+                                 (/(english|in english|answer in english|respond in english|speak english)/i.test(message) ? 'en' : 'pt');
+        
+        await whatsappService.sendConsortiumTypeOptions(phone, preferredLanguage);
+        
+        const historyMessage = preferredLanguage === 'en'
+          ? 'You want consortium for:\n\n1. 🚗 Car\n\n2. 🏠 Property\n\n3. 🔧 Services (renovation, solar panels, etc.)\n\n4. ❓ I don\'t know yet\n\nSee you for the OBJETIVO'
+          : 'Você quer consórcio de:\n\n1. 🚗 Carro\n\n2. 🏠 Imóvel\n\n3. 🔧 Serviços (reforma, placas solares etc.)\n\n4. ❓ Não sei ainda';
+        
+        sessionService.addToHistory(phone, historyMessage, 'bot');
         sessionService.updateSession(phone, { state: 'AWAITING_TYPE' });
         return;
       }
@@ -357,18 +365,26 @@ class OrchestratorService {
 
     // PRIORIDADE 1: Verificar se a mensagem menciona orçamento/cotação de consórcio
     // Isso deve ser verificado ANTES de qualquer outra detecção para garantir que sempre mostre as opções
+    // Suporta tanto português quanto inglês
     const messageLower = message.toLowerCase();
-    const hasBudgetKeywords = /(orçamento|orcamento|orçar|orcar|cotar|cotação|quanto|valor|preço|simular|simulação)/i.test(message);
-    const hasConsortiumKeywords = /(consórcio|consorcio)/i.test(message);
+    const hasBudgetKeywords = /(orçamento|orcamento|orçar|orcar|cotar|cotação|quanto|valor|preço|simular|simulação|quote|quotation|budget|price|value|cost|how much|simulate|simulation)/i.test(message);
+    const hasConsortiumKeywords = /(consórcio|consorcio|consortium)/i.test(message);
     
     if (hasBudgetKeywords && hasConsortiumKeywords) {
       // Cliente está perguntando sobre orçamento/cotação de consórcio - SEMPRE mostrar opções de tipos
       console.log('✅ Detectada menção a orçamento/cotação de consórcio - mostrando opções de tipos (prioridade alta)');
-      await whatsappService.sendConsortiumTypeOptions(phone);
-      sessionService.addToHistory(phone, 
-        'Você quer consórcio de:\n\n1. 🚗 Carro\n\n2. 🏠 Imóvel\n\n3. 🔧 Serviços (reforma, placas solares etc.)\n\n4. ❓ Não sei ainda',
-        'bot'
-      );
+      
+      // Detectar idioma preferido da sessão ou da mensagem
+      const preferredLanguage = session.preferredLanguage || 
+                                 (/(english|in english|answer in english|respond in english|speak english)/i.test(message) ? 'en' : 'pt');
+      
+      await whatsappService.sendConsortiumTypeOptions(phone, preferredLanguage);
+      
+      const historyMessage = preferredLanguage === 'en'
+        ? 'You want consortium for:\n\n1. 🚗 Car\n\n2. 🏠 Property\n\n3. 🔧 Services (renovation, solar panels, etc.)\n\n4. ❓ I don\'t know yet\n\nSee you for the OBJETIVO'
+        : 'Você quer consórcio de:\n\n1. 🚗 Carro\n\n2. 🏠 Imóvel\n\n3. 🔧 Serviços (reforma, placas solares etc.)\n\n4. ❓ Não sei ainda';
+      
+      sessionService.addToHistory(phone, historyMessage, 'bot');
       sessionService.updateSession(phone, { state: 'AWAITING_TYPE' });
       return;
     }
@@ -392,11 +408,14 @@ class OrchestratorService {
       if (classification === 'OUTROS' || !classification) {
         // Mostrar opções de tipos ao invés de encaminhar para humano
         console.log('✅ Solicitação de cotação detectada mas tipo não específico ou OUTROS - mostrando opções');
-        await whatsappService.sendConsortiumTypeOptions(phone);
-        sessionService.addToHistory(phone, 
-          'Você quer consórcio de:\n\n1. 🚗 Carro\n\n2. 🏠 Imóvel\n\n3. 🔧 Serviços (reforma, placas solares etc.)\n\n4. ❓ Não sei ainda',
-          'bot'
-        );
+        const preferredLanguage = session.preferredLanguage || 'pt';
+        await whatsappService.sendConsortiumTypeOptions(phone, preferredLanguage);
+        
+        const historyMessage = preferredLanguage === 'en'
+          ? 'You want consortium for:\n\n1. 🚗 Car\n\n2. 🏠 Property\n\n3. 🔧 Services (renovation, solar panels, etc.)\n\n4. ❓ I don\'t know yet\n\nSee you for the OBJETIVO'
+          : 'Você quer consórcio de:\n\n1. 🚗 Carro\n\n2. 🏠 Imóvel\n\n3. 🔧 Serviços (reforma, placas solares etc.)\n\n4. ❓ Não sei ainda';
+        
+        sessionService.addToHistory(phone, historyMessage, 'bot');
         sessionService.updateSession(phone, { state: 'AWAITING_TYPE' });
         return;
       }
@@ -442,11 +461,14 @@ class OrchestratorService {
 
       // QUOTE_REQUEST mas tipo não detectado ou não específico - mostrar opções de tipos
       console.log('✅ Solicitação de cotação detectada mas tipo não específico - mostrando opções');
-      await whatsappService.sendConsortiumTypeOptions(phone);
-      sessionService.addToHistory(phone, 
-        'Você quer consórcio de:\n\n1. 🚗 Carro\n\n2. 🏠 Imóvel\n\n3. 🔧 Serviços (reforma, placas solares etc.)\n\n4. ❓ Não sei ainda',
-        'bot'
-      );
+      const preferredLanguage = session.preferredLanguage || 'pt';
+      await whatsappService.sendConsortiumTypeOptions(phone, preferredLanguage);
+      
+      const historyMessage = preferredLanguage === 'en'
+        ? 'You want consortium for:\n\n1. 🚗 Car\n\n2. 🏠 Property\n\n3. 🔧 Services (renovation, solar panels, etc.)\n\n4. ❓ I don\'t know yet\n\nSee you for the OBJETIVO'
+        : 'Você quer consórcio de:\n\n1. 🚗 Carro\n\n2. 🏠 Imóvel\n\n3. 🔧 Serviços (reforma, placas solares etc.)\n\n4. ❓ Não sei ainda';
+      
+      sessionService.addToHistory(phone, historyMessage, 'bot');
       sessionService.updateSession(phone, { state: 'AWAITING_TYPE' });
       return;
     }
@@ -491,18 +513,26 @@ class OrchestratorService {
   async handleConversationalState(phone, message, session) {
     // PRIORIDADE 1: Verificar se a mensagem menciona orçamento/cotação de consórcio
     // Isso deve ser verificado ANTES de qualquer outra detecção para garantir que sempre mostre as opções
+    // Suporta tanto português quanto inglês
     const messageLower = message.toLowerCase();
-    const hasBudgetKeywords = /(orçamento|orcamento|orçar|orcar|cotar|cotação|quanto|valor|preço|simular|simulação)/i.test(message);
-    const hasConsortiumKeywords = /(consórcio|consorcio)/i.test(message);
+    const hasBudgetKeywords = /(orçamento|orcamento|orçar|orcar|cotar|cotação|quanto|valor|preço|simular|simulação|quote|quotation|budget|price|value|cost|how much|simulate|simulation)/i.test(message);
+    const hasConsortiumKeywords = /(consórcio|consorcio|consortium)/i.test(message);
     
     if (hasBudgetKeywords && hasConsortiumKeywords) {
       // Cliente está perguntando sobre orçamento/cotação de consórcio - SEMPRE mostrar opções de tipos
       console.log('✅ Detectada menção a orçamento/cotação de consórcio no estado conversacional - mostrando opções de tipos (prioridade alta)');
-      await whatsappService.sendConsortiumTypeOptions(phone);
-      sessionService.addToHistory(phone, 
-        'Você quer consórcio de:\n\n1. 🚗 Carro\n\n2. 🏠 Imóvel\n\n3. 🔧 Serviços (reforma, placas solares etc.)\n\n4. ❓ Não sei ainda',
-        'bot'
-      );
+      
+      // Detectar idioma preferido da sessão ou da mensagem
+      const preferredLanguage = session.preferredLanguage || 
+                                 (/(english|in english|answer in english|respond in english|speak english)/i.test(message) ? 'en' : 'pt');
+      
+      await whatsappService.sendConsortiumTypeOptions(phone, preferredLanguage);
+      
+      const historyMessage = preferredLanguage === 'en'
+        ? 'You want consortium for:\n\n1. 🚗 Car\n\n2. 🏠 Property\n\n3. 🔧 Services (renovation, solar panels, etc.)\n\n4. ❓ I don\'t know yet\n\nSee you for the OBJETIVO'
+        : 'Você quer consórcio de:\n\n1. 🚗 Carro\n\n2. 🏠 Imóvel\n\n3. 🔧 Serviços (reforma, placas solares etc.)\n\n4. ❓ Não sei ainda';
+      
+      sessionService.addToHistory(phone, historyMessage, 'bot');
       sessionService.updateSession(phone, { state: 'AWAITING_TYPE' });
       return;
     }
@@ -527,11 +557,14 @@ class OrchestratorService {
       if (classification === 'OUTROS' || !classification) {
         // Mostrar opções de tipos ao invés de encaminhar para humano
         console.log('✅ Solicitação de cotação detectada mas tipo não específico ou OUTROS - mostrando opções');
-        await whatsappService.sendConsortiumTypeOptions(phone);
-        sessionService.addToHistory(phone, 
-          'Você quer consórcio de:\n\n1. 🚗 Carro\n\n2. 🏠 Imóvel\n\n3. 🔧 Serviços (reforma, placas solares etc.)\n\n4. ❓ Não sei ainda',
-          'bot'
-        );
+        const preferredLanguage = session.preferredLanguage || 'pt';
+        await whatsappService.sendConsortiumTypeOptions(phone, preferredLanguage);
+        
+        const historyMessage = preferredLanguage === 'en'
+          ? 'You want consortium for:\n\n1. 🚗 Car\n\n2. 🏠 Property\n\n3. 🔧 Services (renovation, solar panels, etc.)\n\n4. ❓ I don\'t know yet\n\nSee you for the OBJETIVO'
+          : 'Você quer consórcio de:\n\n1. 🚗 Carro\n\n2. 🏠 Imóvel\n\n3. 🔧 Serviços (reforma, placas solares etc.)\n\n4. ❓ Não sei ainda';
+        
+        sessionService.addToHistory(phone, historyMessage, 'bot');
         sessionService.updateSession(phone, { state: 'AWAITING_TYPE' });
         return;
       }

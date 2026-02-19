@@ -373,9 +373,23 @@ Vai para OBJETIVO`;
   /**
    * Envia apenas as opções de tipos de consórcio (sem introdução completa)
    * Usado quando cliente pergunta sobre orçamento/cotação durante a conversa
+   * @param {string} phone - Número do telefone
+   * @param {string} preferredLanguage - Idioma preferido ('pt' ou 'en')
    */
-  async sendConsortiumTypeOptions(phone) {
-    const message = `Você quer consórcio de:
+  async sendConsortiumTypeOptions(phone, preferredLanguage = 'pt') {
+    const message = preferredLanguage === 'en'
+      ? `You want consortium for:
+
+1. 🚗 Car
+
+2. 🏠 Property
+
+3. 🔧 Services (renovation, solar panels, etc.)
+
+4. ❓ I don't know yet
+
+See you for the OBJETIVO`
+      : `Você quer consórcio de:
 
 1. 🚗 Carro
 
@@ -576,17 +590,47 @@ Como deseja prosseguir?`;
   async forwardToHuman(phone, reason, customerData, preferredLanguage = 'pt') {
     const adminNumber = config.whatsapp.adminNumber;
     
+    // Log para debug - mostrar qual número será usado
+    console.log(`\n🔍 [DEBUG] Encaminhando cliente ${phone} para consultor`);
+    console.log(`   Número do consultor configurado: ${adminNumber || 'NÃO CONFIGURADO'}`);
+    
+    // Formatar dados do cliente de forma mais legível
+    let customerInfo = '';
+    if (customerData.name && customerData.name !== 'Não informado') {
+      customerInfo += `*Nome:* ${customerData.name}\n`;
+    }
+    if (customerData.email) {
+      customerInfo += `*E-mail:* ${customerData.email}\n`;
+    }
+    if (customerData.cpf) {
+      customerInfo += `*CPF:* ${customerData.cpf}\n`;
+    }
+    if (customerData.consortiumType) {
+      customerInfo += `*Tipo de Consórcio:* ${customerData.consortiumType}\n`;
+    }
+    if (customerData.message) {
+      customerInfo += `\n*Mensagem do Cliente:*\n${customerData.message}\n`;
+    }
+    
+    // Se houver outros dados, adicionar como JSON
+    const otherData = { ...customerData };
+    delete otherData.name;
+    delete otherData.email;
+    delete otherData.cpf;
+    delete otherData.consortiumType;
+    delete otherData.message;
+    
+    if (Object.keys(otherData).length > 0) {
+      customerInfo += `\n*Outros Dados:*\n\`\`\`\n${JSON.stringify(otherData, null, 2)}\n\`\`\``;
+    }
+
     const messageToAdmin = `🔔 *Novo Atendimento Humano Necessário*
 
 *Motivo:* ${reason}
-*Cliente:* ${phone}
-*Nome:* ${customerData.name || 'Não informado'}
-
-*Dados do Cliente:*
-${JSON.stringify(customerData, null, 2)}
-
+*Telefone do Cliente:* ${phone}
+${customerInfo ? '\n' + customerInfo : ''}
 ---
-Por favor, entre em contato com o cliente.`;
+📞 *Ação Necessária:* Entre em contato com o cliente através do WhatsApp: ${phone}`;
 
     // Only send to admin if not a frontend user (frontend users are for testing)
     // In frontend mode, just log the notification
@@ -594,7 +638,27 @@ Por favor, entre em contato com o cliente.`;
       console.log('📢 [FRONTEND MODE] Notificação de atendimento humano:');
       console.log(messageToAdmin);
     } else {
-      await this.sendMessage(adminNumber, messageToAdmin);
+      // Validate admin number before sending
+      if (!adminNumber) {
+        console.error('❌ ERRO: ADMIN_WHATSAPP não configurado no arquivo .env');
+        console.error('   A mensagem para o consultor não pode ser enviada.');
+        console.error('   Configure ADMIN_WHATSAPP no arquivo .env com o número do WhatsApp do consultor.');
+        // Still send confirmation to customer, but log the error
+        // The counselor won't be notified, but at least the customer knows their request was received
+      } else {
+        try {
+          console.log(`📤 Enviando mensagem para consultor no número: ${adminNumber}`);
+          await this.sendMessage(adminNumber, messageToAdmin);
+          console.log(`✅ Notificação enviada com sucesso ao consultor (${adminNumber})`);
+          console.log(`   Cliente: ${phone}`);
+          console.log(`   Motivo: ${reason}`);
+        } catch (error) {
+          console.error('❌ Erro ao enviar notificação ao consultor:', error.message);
+          console.error(`   Tentativa de envio para: ${adminNumber}`);
+          console.error('   O cliente ainda receberá confirmação, mas o consultor não foi notificado.');
+          // Continue execution - customer should still get confirmation
+        }
+      }
     }
 
     const messageToCustomer = preferredLanguage === 'en'

@@ -69,4 +69,14 @@ export function validateConfig() {
       throw new Error(`Configurações obrigatórias faltando: ${missing.join(', ')}`);
     }
   }
+  
+  // Warn if ADMIN_WHATSAPP is not configured (not required, but recommended)
+  if (!process.env.ADMIN_WHATSAPP) {
+    console.warn('\n⚠️  AVISO: ADMIN_WHATSAPP não configurado no arquivo .env');
+    console.warn('   As notificações de atendimento humano não serão enviadas aos consultores.');
+    console.warn('   Configure ADMIN_WHATSAPP no arquivo .env com o número do WhatsApp do consultor.');
+    console.warn('   Formato: 5511999999999 (código do país + DDD + número, sem espaços)\n');
+  } else {
+    console.log(`✅ ADMIN_WHATSAPP configurado: ${process.env.ADMIN_WHATSAPP.substring(0, 4)}****${process.env.ADMIN_WHATSAPP.substring(process.env.ADMIN_WHATSAPP.length - 3)}`);
+  }
 }

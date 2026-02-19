@@ -43,6 +43,16 @@ class CanopusRPAService {
       return true;
     } catch (error) {
       console.error('❌ Erro ao iniciar navegador:', error.message);
+      
+      // Verificar se o erro é relacionado a browsers não instalados
+      if (error.message.includes('Executable doesn\'t exist') || 
+          error.message.includes('browserType.launch') ||
+          error.message.includes('playwright install')) {
+        console.error('⚠️ Playwright browsers não foram instalados corretamente.');
+        console.error('💡 Solução: Execute "npm run install:browsers" ou "npx playwright install chromium"');
+        console.error('💡 Em produção (Render), certifique-se de que o script "postinstall" está configurado no package.json');
+      }
+      
       throw error;
     }
   }
@@ -1540,7 +1550,12 @@ class CanopusRPAService {
           // Pegar o número de registros na primeira página
           const firstPageRows = await this.page.locator('table#table tbody tr').count();
           if (firstPageRows > 0) {
-            const estimatedPages = Math.ceil(totalRecords / firstPageRows);
+            // Limitar o cálculo de páginas para evitar loops infinitos
+            // Se firstPageRows é muito pequeno (1), pode ser que estejamos em modo de busca
+            // Nesse caso, usar um limite mais conservador
+            const estimatedPages = firstPageRows === 1 
+              ? Math.min(Math.ceil(totalRecords / 10), 30) // Assumir ~10 registros por página, máximo 30
+              : Math.ceil(totalRecords / firstPageRows);
             console.log(`ℹ️  Total de registros: ${totalRecords}, Registros por página: ${firstPageRows}, Páginas estimadas: ${estimatedPages}`);
             return estimatedPages;
           }
@@ -1863,7 +1878,10 @@ class CanopusRPAService {
         let lastExtractedPage = 1;
         let consecutiveFailures = 0;
         const maxConsecutiveFailures = 3;
-        const maxPages = totalPages ? Math.min(totalPages + 2, 50) : 50; // Limite baseado no total detectado + margem de segurança
+        // Limite mais conservador: máximo 25 páginas para evitar loops infinitos
+        // Se totalPages foi calculado incorretamente, ainda temos um limite de segurança
+        const maxPages = totalPages ? Math.min(totalPages, 25) : 25; // Limite máximo de 25 páginas
+        console.log(`📊 Limite máximo de páginas definido: ${maxPages} (totalPages detectado: ${totalPages || 'N/A'})`);
         
         for (let pageNum = 2; pageNum <= maxPages; pageNum++) {
           // Verificar se estamos na última página ANTES de tentar navegar
@@ -1919,6 +1937,20 @@ class CanopusRPAService {
           
           consecutiveFailures = 0; // Reset contador
           
+          // Verificar se realmente navegamos para a página correta
+          const actualPage = await this.getCurrentPageNumber();
+          if (actualPage && actualPage !== pageNum && actualPage < pageNum) {
+            console.warn(`⚠️  Navegação não funcionou corretamente. Esperado página ${pageNum}, mas estamos na página ${actualPage}`);
+            // Se estamos presos na mesma página, incrementar falhas
+            if (actualPage === lastExtractedPage) {
+              consecutiveFailures++;
+              if (consecutiveFailures >= maxConsecutiveFailures) {
+                console.warn(`⚠️  Preso na página ${actualPage} após ${consecutiveFailures} tentativas, finalizando...`);
+                break;
+              }
+            }
+          }
+          
           // Extrair dados desta página
           const pageData = await this.extractTablePageData();
           
@@ -1971,45 +2003,13 @@ class CanopusRPAService {
           await this.page.waitForTimeout(1000);
         }
         
-        // Se ainda não extraímos todas as páginas detectadas e não estamos na última, continuar com Next button
-        // Mas apenas se não tivermos um totalPages detectado ou se ainda estivermos abaixo dele
-        if ((!totalPages || lastExtractedPage < totalPages) && lastExtractedPage < maxPages) {
-          const isLast = await this.isLastPage();
-          if (!isLast) {
-            console.log(`⚠️  Apenas ${lastExtractedPage} páginas extraídas, continuando com botão Next...`);
-            while ((!totalPages || lastExtractedPage < totalPages) && lastExtractedPage < maxPages) {
-              const isLastNow = await this.isLastPage();
-              if (isLastNow) {
-                console.log(`ℹ️  Chegamos na última página (${lastExtractedPage})`);
-                break;
-              }
-              
-              const nextSuccess = await this.navigateToNextPage();
-              if (!nextSuccess) {
-                console.log(`ℹ️  Não foi possível navegar para próxima página, finalizando em ${lastExtractedPage}`);
-                break;
-              }
-              
-              lastExtractedPage++;
-              console.log(`📄 Extraindo página ${lastExtractedPage}...`);
-              
-              const pageData = await this.extractTablePageData();
-              if (pageData.rows.length === 0) {
-                console.log(`ℹ️  Nenhum dado na página ${lastExtractedPage}, finalizando...`);
-                break;
-              }
-              
-              const startRowNumber = allRows.length + 1;
-              pageData.rows.forEach((row, index) => {
-                row.rowNumber = startRowNumber + index;
-                allRows.push(row);
-              });
-              
-              console.log(`✅ Página ${lastExtractedPage} extraída: ${pageData.rows.length} registros (Total acumulado: ${allRows.length})`);
-              await this.page.waitForTimeout(1000);
-            }
-          }
-        }
+        // REMOVIDO: Loop secundário que causava loops infinitos
+        // O loop principal já cobre todas as páginas necessárias
+        // Se chegamos aqui e ainda não extraímos todas as páginas, é porque:
+        // 1. Já chegamos na última página (isLastPage retornou true)
+        // 2. Encontramos dados duplicados
+        // 3. Não há mais dados para extrair
+        // Não precisamos de um loop secundário que pode causar loops infinitos
         
         totalPages = lastExtractedPage;
       }
