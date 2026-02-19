@@ -2035,7 +2035,8 @@ class CanopusRPAService {
           prazo: bestMatchSoFar.prazo,
           primeiraParcela: bestMatchSoFar.primeiraParcela,
           plano: bestMatchSoFar.plano,
-          tipoVenda: bestMatchSoFar.tipoVenda
+          tipoVenda: bestMatchSoFar.tipoVenda,
+          rawData: bestMatchSoFar.rawData || bestMatchSoFar // Incluir rawData completo
         } : null,
         rows: allRows.map(row => {
           const cleanRow = { ...row.data };
@@ -2055,63 +2056,7 @@ class CanopusRPAService {
       const jsonFilepath = path.join(dataDir, jsonFilename);
       
       fs.writeFileSync(jsonFilepath, JSON.stringify(cleanTableData, null, 2), 'utf-8');
-      console.log(`💾 Dados salvos em JSON: ${jsonFilename}`);
-      
-      // Salvar também em formato CSV para fácil importação
-      const csvFilename = `table-data-${consortiumType}-all-pages-${timestamp}.csv`;
-      const csvFilepath = path.join(dataDir, csvFilename);
-      
-      let csvContent = '';
-      // Cabeçalho CSV
-      if (headers.length > 0) {
-        csvContent += headers.map(h => `"${h}"`).join(',') + '\n';
-      }
-      
-      // Dados CSV
-      allRows.forEach((row) => {
-        const csvRow = headers.map((header, index) => {
-          const value = row.data[header] || row.data[`_col_${index}`] || '';
-          // Escapar aspas e quebras de linha no CSV
-          return `"${value.replace(/"/g, '""')}"`;
-        });
-        csvContent += csvRow.join(',') + '\n';
-      });
-      
-      fs.writeFileSync(csvFilepath, csvContent, 'utf-8');
-      console.log(`💾 Dados salvos em CSV: ${csvFilename}`);
-      
-      // Salvar também em formato texto legível
-      const txtFilename = `table-data-${consortiumType}-all-pages-${timestamp}.txt`;
-      const txtFilepath = path.join(dataDir, txtFilename);
-      
-      const consortiumTypeUpper = consortiumType.toUpperCase();
-      let textContent = `=== DADOS DA TABELA - ${consortiumTypeUpper} (TODAS AS PÁGINAS) ===\n\n`;
-      textContent += `Data/Hora de Extração: ${new Date().toLocaleString('pt-BR')}\n`;
-      textContent += `Total de Páginas: ${totalPages}\n`;
-      textContent += `Total de Registros: ${allRows.length}\n\n`;
-      
-      if (headers.length > 0) {
-        textContent += '=== COLUNAS ===\n';
-        headers.forEach((header, index) => {
-          textContent += `  ${index + 1}. ${header}\n`;
-        });
-        textContent += '\n';
-      }
-      
-      if (allRows.length > 0) {
-        textContent += '=== DADOS ESTRUTURADOS ===\n\n';
-        allRows.forEach((row, index) => {
-          textContent += `--- Registro ${index + 1} (Página ${Math.floor(index / (allRows.length / totalPages)) + 1}) ---\n`;
-          headers.forEach((header, headerIndex) => {
-            const value = row.data[header] || row.data[`_col_${headerIndex}`] || '';
-            textContent += `  ${header}: ${value}\n`;
-          });
-          textContent += '\n';
-        });
-      }
-      
-      fs.writeFileSync(txtFilepath, textContent, 'utf-8');
-      console.log(`💾 Dados salvos em TXT: ${txtFilename}`);
+      console.log(`💾 Dados salvos apenas em JSON: ${jsonFilename}`);
       
       // Exibir resumo no console
       console.log(`\n📊 Resumo dos dados extraídos:`);
@@ -2119,10 +2064,7 @@ class CanopusRPAService {
       console.log(`   - Total de registros: ${allRows.length}`);
       console.log(`   - Total de colunas: ${headers.length}`);
       console.log(`   - Colunas: ${headers.join(', ')}`);
-      console.log(`   - Arquivos salvos em: ./data/`);
-      console.log(`     • JSON: ${jsonFilename}`);
-      console.log(`     • CSV: ${csvFilename}`);
-      console.log(`     • TXT: ${txtFilename}`);
+      console.log(`   - Arquivo salvo em: ./data/${jsonFilename}`);
       
       return cleanTableData;
       
@@ -2171,26 +2113,29 @@ class CanopusRPAService {
         );
 
         const termDifference = Math.abs(planTerm - customerTerm);
+        const valueDifference = Math.abs(planValue - cleanCustomerValue);
         
-        // Se o prazo está próximo (diferença de até 10 meses)
-        if (termDifference <= 10) {
-          const valueDifference = Math.abs(planValue - cleanCustomerValue);
-          const totalDifference = valueDifference + (termDifference * 1000);
+        // Calcular diferença total (sem restrições de prazo)
+        const valuePercentDiff = valueDifference / cleanCustomerValue;
+        const termPercentDiff = termDifference / customerTerm;
+        const totalDifference = valuePercentDiff * 1000 + termPercentDiff * 100;
 
-          if (totalDifference < smallestDifference) {
-            smallestDifference = totalDifference;
-            bestMatch = {
-              nomeBem: rowData['NOME DO BEM'] || rowData['Nome do bem'] || rowData['nome_bem'] || '',
-              valor: planValue,
-              prazo: planTerm,
-              primeiraParcela: firstPayment || 0,
-              plano: rowData['PLANO'] || rowData['Plano'] || rowData['plano'] || '',
-              tipoVenda: rowData['TIPO DE VENDA'] || rowData['Tipo de Venda'] || rowData['tipo_venda'] || '',
-              rawData: rowData,
-              valueDifference: valueDifference,
-              termDifference: termDifference
-            };
-          }
+        if (totalDifference < smallestDifference) {
+          smallestDifference = totalDifference;
+          bestMatch = {
+            nomeBem: rowData['NOME DO BEM'] || rowData['Nome do bem'] || rowData['nome_bem'] || '',
+            valor: planValue,
+            valorTexto: rowData['VALOR'] || rowData['Valor'] || rowData['valor'] || '',
+            prazo: planTerm,
+            prazoTexto: rowData['PRAZO'] || rowData['Prazo'] || rowData['prazo'] || '',
+            primeiraParcela: firstPayment || 0,
+            primeiraParcelaTexto: rowData['1ª PARCELA'] || rowData['1ª parcela'] || rowData['primeira_parcela'] || '',
+            plano: rowData['PLANO'] || rowData['Plano'] || rowData['plano'] || '',
+            tipoVenda: rowData['TIPO DE VENDA'] || rowData['Tipo de Venda'] || rowData['tipo_venda'] || '',
+            rawData: rowData,
+            valueDifference: valueDifference,
+            termDifference: termDifference
+          };
         }
       } catch (e) {
         continue;
@@ -2214,48 +2159,51 @@ class CanopusRPAService {
         customerValue.toString().replace(/[^\d,]/g, '').replace(',', '.')
       );
 
-      // Procurar planos que correspondam ao valor e prazo do cliente
+      // Procurar o plano mais próximo (sem restrições de diferença)
       let bestMatch = null;
       let smallestDifference = Infinity;
 
       for (const row of scrapedData.rows) {
         try {
-          // Extrair valor do plano
-          const planValueText = row['Valor'] || row['valor'] || '';
+          // Extrair valor do plano - usar nomes de campo do JSON
+          const planValueText = row['VALOR'] || row['Valor'] || row['valor'] || '';
           const planValue = parseFloat(
-            planValueText.replace(/[^\d,]/g, '').replace(',', '.')
+            planValueText.toString().replace(/[^\d,]/g, '').replace(',', '.')
           );
 
           // Extrair prazo do plano
-          const planTermText = row['Prazo'] || row['prazo'] || '';
-          const planTerm = parseInt(planTermText.replace(/\D/g, ''));
+          const planTermText = row['PRAZO'] || row['Prazo'] || row['prazo'] || '';
+          const planTerm = parseInt(planTermText.toString().replace(/\D/g, ''));
 
           // Extrair primeira parcela
-          const firstPaymentText = row['1ª parcela'] || row['primeira_parcela'] || '';
+          const firstPaymentText = row['1ª PARCELA'] || row['1ª parcela'] || row['primeira_parcela'] || '';
           const firstPayment = parseFloat(
-            firstPaymentText.replace(/[^\d,]/g, '').replace(',', '.')
+            firstPaymentText.toString().replace(/[^\d,]/g, '').replace(',', '.')
           );
 
-          // Verificar se o prazo corresponde (com tolerância)
+          // Calcular diferença total (sem restrições)
+          const valueDifference = Math.abs(planValue - cleanCustomerValue);
           const termDifference = Math.abs(planTerm - customerTerm);
           
-          // Se o prazo está próximo (diferença de até 10 meses) e o valor está próximo
-          if (termDifference <= 10) {
-            const valueDifference = Math.abs(planValue - cleanCustomerValue);
-            const totalDifference = valueDifference + (termDifference * 1000); // Peso para prazo
+          // Usar peso maior para valor, mas considerar ambos
+          const valuePercentDiff = valueDifference / cleanCustomerValue;
+          const termPercentDiff = termDifference / customerTerm;
+          const totalDifference = valuePercentDiff * 1000 + termPercentDiff * 100;
 
-            if (totalDifference < smallestDifference) {
-              smallestDifference = totalDifference;
-              bestMatch = {
-                nomeBem: row['Nome do bem'] || row['nome_bem'] || '',
-                valor: planValue,
-                prazo: planTerm,
-                primeiraParcela: firstPayment,
-                plano: row['Plano'] || row['plano'] || '',
-                tipoVenda: row['Tipo de Venda'] || row['tipo_venda'] || '',
-                rawData: row
-              };
-            }
+          if (totalDifference < smallestDifference) {
+            smallestDifference = totalDifference;
+            bestMatch = {
+              nomeBem: row['NOME DO BEM'] || row['Nome do bem'] || row['nome_bem'] || '',
+              valor: planValue,
+              valorTexto: row['VALOR'] || row['Valor'] || row['valor'] || '',
+              prazo: planTerm,
+              prazoTexto: row['PRAZO'] || row['Prazo'] || row['prazo'] || '',
+              primeiraParcela: firstPayment,
+              primeiraParcelaTexto: row['1ª PARCELA'] || row['1ª parcela'] || row['primeira_parcela'] || '',
+              plano: row['PLANO'] || row['Plano'] || row['plano'] || '',
+              tipoVenda: row['TIPO DE VENDA'] || row['Tipo de Venda'] || row['tipo_venda'] || '',
+              rawData: row
+            };
           }
         } catch (e) {
           // Continuar se houver erro ao processar uma linha
@@ -2301,17 +2249,8 @@ class CanopusRPAService {
       }
       
       // Usar match encontrado durante extração se disponível
-      if (extractionResult && extractionResult.bestMatch) {
-        bestPlan = {
-          nomeBem: extractionResult.bestMatch.nomeBem,
-          valor: extractionResult.bestMatch.valor,
-          prazo: extractionResult.bestMatch.prazo,
-          primeiraParcela: extractionResult.bestMatch.primeiraParcela,
-          plano: extractionResult.bestMatch.plano,
-          tipoVenda: extractionResult.bestMatch.tipoVenda,
-          rawData: extractionResult.bestMatch.rawData
-        };
-        
+      if (extractionResult && extractionResult.bestMatch && extractionResult.bestMatch.rawData) {
+        bestPlan = extractionResult.bestMatch.rawData; // Usar o objeto row completo diretamente
         if (extractionResult.earlyTermination) {
           console.log('⚡ Extração otimizada: parou cedo após encontrar match exato!');
         } else {
@@ -2319,7 +2258,7 @@ class CanopusRPAService {
         }
       }
       
-      // Fallback: Se não encontrou durante extração, tentar buscar nos dados salvos
+      // Fallback: Se não encontrou durante extração, buscar nos dados salvos
       if (!bestPlan) {
         console.log('⚠️  Plano não encontrado durante extração, verificando dados salvos...');
         const dataDir = path.join(process.cwd(), 'data');
@@ -2336,24 +2275,11 @@ class CanopusRPAService {
               const fileContent = fs.readFileSync(latestFile, 'utf-8');
               const scrapedData = JSON.parse(fileContent);
               
-              // Verificar se há bestMatch salvo no arquivo
-              if (scrapedData.bestMatch) {
-                bestPlan = {
-                  nomeBem: scrapedData.bestMatch.nomeBem,
-                  valor: scrapedData.bestMatch.valor,
-                  prazo: scrapedData.bestMatch.prazo,
-                  primeiraParcela: scrapedData.bestMatch.primeiraParcela,
-                  plano: scrapedData.bestMatch.plano,
-                  tipoVenda: scrapedData.bestMatch.tipoVenda,
-                  rawData: scrapedData.bestMatch
-                };
-                console.log('✅ Usando match salvo do arquivo');
-              } else {
-                // Buscar manualmente nos dados
-                bestPlan = this.findBestMatchingPlan(scrapedData, data.valor, data.prazo);
-                if (bestPlan) {
-                  console.log('✅ Plano encontrado nos dados salvos');
-                }
+              // Buscar o plano mais similar nos dados salvos
+              const match = this.findBestMatchingPlan(scrapedData, data.valor, data.prazo);
+              if (match && match.rawData) {
+                bestPlan = match.rawData; // Usar o objeto row completo diretamente
+                console.log('✅ Plano encontrado nos dados salvos');
               }
             } catch (e) {
               console.warn('⚠️  Erro ao ler arquivo salvo:', e.message);
@@ -2363,54 +2289,37 @@ class CanopusRPAService {
       }
 
       if (!bestPlan) {
-        // Se não encontrou plano exato, usar estimativa
-        console.log('⚠️  Plano exato não encontrado, usando estimativa...');
-        return {
-          type: 'Consórcio de Automóvel',
-          value: data.valor,
-          months: data.prazo,
-          monthlyPayment: this.calculateEstimatedPayment(data.valor, data.prazo),
-          adminFee: 15,
-          details: 'Cotação baseada em estimativa. Entre em contato para valores exatos.',
-          timestamp: new Date().toISOString(),
-          customerData: {
-            nome: data.nome,
-            cpf: data.cpf,
-            email: data.email
-          }
-        };
+        throw new Error('Não foi possível encontrar nenhum plano disponível nos dados. Por favor, tente novamente mais tarde.');
       }
 
+      // Verificar se é match exato
+      const planValue = parseFloat((bestPlan['VALOR'] || '').replace(/[^\d,]/g, '').replace(',', '.'));
+      const planTerm = parseInt((bestPlan['PRAZO'] || '').replace(/\D/g, ''));
+      const isExactMatch = planValue && planTerm && 
+        (Math.abs(planValue - data.valor) < 0.01) && 
+        (planTerm === data.prazo);
+
       console.log('✅ Plano encontrado:');
-      console.log(`   Nome: ${bestPlan.nomeBem}`);
-      console.log(`   Valor: R$ ${bestPlan.valor.toLocaleString('pt-BR')}`);
-      console.log(`   Prazo: ${bestPlan.prazo} meses`);
-      console.log(`   1ª Parcela: R$ ${bestPlan.primeiraParcela.toLocaleString('pt-BR')}`);
+      console.log(`   NOME DO BEM: ${bestPlan['NOME DO BEM'] || 'N/A'}`);
+      console.log(`   VALOR: ${bestPlan['VALOR'] || 'N/A'}`);
+      console.log(`   PRAZO: ${bestPlan['PRAZO'] || 'N/A'}`);
+      console.log(`   1ª PARCELA: ${bestPlan['1ª PARCELA'] || 'N/A'}`);
+      console.log(`   PLANO: ${bestPlan['PLANO'] || 'N/A'}`);
+      console.log(`   TIPO DE VENDA: ${bestPlan['TIPO DE VENDA'] || 'N/A'}`);
 
-      // Calcular parcela mensal estimada (se não disponível)
-      const monthlyPayment = bestPlan.primeiraParcela || 
-        this.calculateEstimatedPayment(bestPlan.valor, bestPlan.prazo);
-
-      // Preparar dados da cotação
+      // Preparar dados da cotação usando o objeto row completo
       const quotationData = {
         type: 'Consórcio de Automóvel',
-        value: bestPlan.valor,
-        months: bestPlan.prazo,
-        monthlyPayment: monthlyPayment,
-        adminFee: 15, // Taxa padrão
-        details: `Plano: ${bestPlan.plano}\nTipo de Venda: ${bestPlan.tipoVenda}\nNome do Bem: ${bestPlan.nomeBem}`,
+        rawData: bestPlan, // O objeto row completo do JSON
+        isExactMatch: isExactMatch,
+        requestedValue: data.valor,
+        requestedTerm: data.prazo,
         timestamp: new Date().toISOString(),
-        optimized: extractionResult ? extractionResult.earlyTermination : false,
         customerData: {
           nome: data.nome,
           cpf: data.cpf,
           email: data.email,
           dataNascimento: data.dataNascimento
-        },
-        planDetails: {
-          nomeBem: bestPlan.nomeBem,
-          plano: bestPlan.plano,
-          tipoVenda: bestPlan.tipoVenda
         }
       };
       
@@ -2455,14 +2364,20 @@ class CanopusRPAService {
       
       // Usar match encontrado durante extração se disponível
       if (extractionResult && extractionResult.bestMatch) {
+        const match = extractionResult.bestMatch;
+        // Garantir que rawData é o objeto original da linha, não o objeto processado
+        const originalRow = match.rawData || match;
         bestPlan = {
-          nomeBem: extractionResult.bestMatch.nomeBem,
-          valor: extractionResult.bestMatch.valor,
-          prazo: extractionResult.bestMatch.prazo,
-          primeiraParcela: extractionResult.bestMatch.primeiraParcela,
-          plano: extractionResult.bestMatch.plano,
-          tipoVenda: extractionResult.bestMatch.tipoVenda,
-          rawData: extractionResult.bestMatch.rawData
+          nomeBem: match.nomeBem || originalRow['NOME DO BEM'] || '',
+          valor: match.valor,
+          valorTexto: originalRow['VALOR'] || match.valorTexto || '',
+          prazo: match.prazo,
+          prazoTexto: originalRow['PRAZO'] || match.prazoTexto || '',
+          primeiraParcela: match.primeiraParcela,
+          primeiraParcelaTexto: originalRow['1ª PARCELA'] || match.primeiraParcelaTexto || '',
+          plano: originalRow['PLANO'] || match.plano || '',
+          tipoVenda: originalRow['TIPO DE VENDA'] || match.tipoVenda || '',
+          rawData: originalRow // Garantir que rawData é o objeto original da linha
         };
         
         if (extractionResult.earlyTermination) {
@@ -2472,7 +2387,7 @@ class CanopusRPAService {
         }
       }
       
-      // Fallback: Se não encontrou durante extração, tentar buscar nos dados salvos
+      // Fallback: Se não encontrou durante extração, buscar nos dados salvos
       if (!bestPlan) {
         console.log('⚠️  Plano não encontrado durante extração, verificando dados salvos...');
         const dataDir = path.join(process.cwd(), 'data');
@@ -2489,24 +2404,11 @@ class CanopusRPAService {
               const fileContent = fs.readFileSync(latestFile, 'utf-8');
               const scrapedData = JSON.parse(fileContent);
               
-              // Verificar se há bestMatch salvo no arquivo
-              if (scrapedData.bestMatch) {
-                bestPlan = {
-                  nomeBem: scrapedData.bestMatch.nomeBem,
-                  valor: scrapedData.bestMatch.valor,
-                  prazo: scrapedData.bestMatch.prazo,
-                  primeiraParcela: scrapedData.bestMatch.primeiraParcela,
-                  plano: scrapedData.bestMatch.plano,
-                  tipoVenda: scrapedData.bestMatch.tipoVenda,
-                  rawData: scrapedData.bestMatch
-                };
-                console.log('✅ Usando match salvo do arquivo');
-              } else {
-                // Buscar manualmente nos dados
-                bestPlan = this.findBestMatchingPlan(scrapedData, data.valor, data.prazo);
-                if (bestPlan) {
-                  console.log('✅ Plano encontrado nos dados salvos');
-                }
+              // Buscar o plano mais similar nos dados salvos
+              const match = this.findBestMatchingPlan(scrapedData, data.valor, data.prazo);
+              if (match && match.rawData) {
+                bestPlan = match.rawData; // Usar o objeto row completo diretamente
+                console.log('✅ Plano encontrado nos dados salvos');
               }
             } catch (e) {
               console.warn('⚠️  Erro ao ler arquivo salvo:', e.message);
@@ -2516,54 +2418,37 @@ class CanopusRPAService {
       }
 
       if (!bestPlan) {
-        // Se não encontrou plano exato, usar estimativa
-        console.log('⚠️  Plano exato não encontrado, usando estimativa...');
-        return {
-          type: 'Consórcio de Imóvel',
-          value: data.valor,
-          months: data.prazo,
-          monthlyPayment: this.calculateEstimatedPayment(data.valor, data.prazo),
-          adminFee: 18,
-          details: 'Cotação baseada em estimativa. Entre em contato para valores exatos.',
-          timestamp: new Date().toISOString(),
-          customerData: {
-            nome: data.nome,
-            cpf: data.cpf,
-            email: data.email
-          }
-        };
+        throw new Error('Não foi possível encontrar nenhum plano disponível nos dados. Por favor, tente novamente mais tarde.');
       }
 
+      // Verificar se é match exato
+      const planValue = parseFloat((bestPlan['VALOR'] || '').replace(/[^\d,]/g, '').replace(',', '.'));
+      const planTerm = parseInt((bestPlan['PRAZO'] || '').replace(/\D/g, ''));
+      const isExactMatch = planValue && planTerm && 
+        (Math.abs(planValue - data.valor) < 0.01) && 
+        (planTerm === data.prazo);
+
       console.log('✅ Plano encontrado:');
-      console.log(`   Nome: ${bestPlan.nomeBem}`);
-      console.log(`   Valor: R$ ${bestPlan.valor.toLocaleString('pt-BR')}`);
-      console.log(`   Prazo: ${bestPlan.prazo} meses`);
-      console.log(`   1ª Parcela: R$ ${bestPlan.primeiraParcela.toLocaleString('pt-BR')}`);
+      console.log(`   NOME DO BEM: ${bestPlan['NOME DO BEM'] || 'N/A'}`);
+      console.log(`   VALOR: ${bestPlan['VALOR'] || 'N/A'}`);
+      console.log(`   PRAZO: ${bestPlan['PRAZO'] || 'N/A'}`);
+      console.log(`   1ª PARCELA: ${bestPlan['1ª PARCELA'] || 'N/A'}`);
+      console.log(`   PLANO: ${bestPlan['PLANO'] || 'N/A'}`);
+      console.log(`   TIPO DE VENDA: ${bestPlan['TIPO DE VENDA'] || 'N/A'}`);
 
-      // Calcular parcela mensal estimada (se não disponível)
-      const monthlyPayment = bestPlan.primeiraParcela || 
-        this.calculateEstimatedPayment(bestPlan.valor, bestPlan.prazo);
-
-      // Preparar dados da cotação
+      // Preparar dados da cotação usando o objeto row completo
       const quotationData = {
         type: 'Consórcio de Imóvel',
-        value: bestPlan.valor,
-        months: bestPlan.prazo,
-        monthlyPayment: monthlyPayment,
-        adminFee: 18, // Taxa padrão para imóveis
-        details: `Plano: ${bestPlan.plano}\nTipo de Venda: ${bestPlan.tipoVenda}\nNome do Bem: ${bestPlan.nomeBem}`,
+        rawData: bestPlan, // O objeto row completo do JSON
+        isExactMatch: isExactMatch,
+        requestedValue: data.valor,
+        requestedTerm: data.prazo,
         timestamp: new Date().toISOString(),
-        optimized: extractionResult ? extractionResult.earlyTermination : false,
         customerData: {
           nome: data.nome,
           cpf: data.cpf,
           email: data.email,
           dataNascimento: data.dataNascimento
-        },
-        planDetails: {
-          nomeBem: bestPlan.nomeBem,
-          plano: bestPlan.plano,
-          tipoVenda: bestPlan.tipoVenda
         }
       };
       

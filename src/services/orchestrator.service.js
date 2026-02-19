@@ -829,67 +829,45 @@ class OrchestratorService {
   }
 
   /**
-   * Gera cotação usando RPA ou dados pre-scraped conforme configuração
+   * Gera cotação usando scraping em tempo real (sempre)
+   * Envia mensagem amigável informando que o processo levará 5-10 minutos
    */
   async generateQuotation(phone, consortiumType, data) {
     try {
-      const usePreScraped = config.quotationMode === 'pre-scraped';
+      // Sempre usar scraping em tempo real para garantir dados atualizados
+      console.log('🕷️  Iniciando scraping em tempo real para gerar cotação atualizada');
       
-      if (usePreScraped) {
-        // Modo rápido: usar dados previamente extraídos
-        console.log('⚡ Modo pre-scraped: usando dados da pasta data/');
-        let quotationData;
+      // Enviar mensagem amigável informando que levará 5-10 minutos
+      await whatsappService.sendScrapingWaitMessage(phone);
+      
+      // Inicializar navegador
+      await canopusRPA.initBrowser(false); // headless=false para debug, true em produção
 
-        // Gerar cotação conforme tipo usando dados pre-scraped
-        if (consortiumType === 'CARRO') {
-          quotationData = await preScrapedDataService.generateCarQuotation(data);
-        } else if (consortiumType === 'IMOVEL') {
-          quotationData = await preScrapedDataService.generatePropertyQuotation(data);
-        }
+      // Fazer login
+      await canopusRPA.login();
 
-        // Enviar cotação ao cliente
-        await whatsappService.sendQuotation(phone, quotationData);
+      let quotationData;
 
-        // Atualizar sessão
-        sessionService.updateSession(phone, {
-          state: 'COMPLETED',
-          quotation: quotationData
-        });
-
-        console.log('✅ Cotação enviada com sucesso (pre-scraped)!');
-      } else {
-        // Modo original: usar scraping em tempo real
-        console.log('🕷️  Modo scraping: acessando website em tempo real');
-        
-        // Inicializar navegador
-        await canopusRPA.initBrowser(false); // headless=false para debug, true em produção
-
-        // Fazer login
-        await canopusRPA.login();
-
-        let quotationData;
-
-        // Gerar cotação conforme tipo
-        if (consortiumType === 'CARRO') {
-          quotationData = await canopusRPA.generateCarQuotation(data);
-        } else if (consortiumType === 'IMOVEL') {
-          quotationData = await canopusRPA.generatePropertyQuotation(data);
-        }
-
-        // Fechar navegador
-        await canopusRPA.close();
-
-        // Enviar cotação ao cliente
-        await whatsappService.sendQuotation(phone, quotationData);
-
-        // Atualizar sessão
-        sessionService.updateSession(phone, {
-          state: 'COMPLETED',
-          quotation: quotationData
-        });
-
-        console.log('✅ Cotação enviada com sucesso (scraping)!');
+      // Gerar cotação conforme tipo
+      if (consortiumType === 'CARRO') {
+        quotationData = await canopusRPA.generateCarQuotation(data);
+      } else if (consortiumType === 'IMOVEL') {
+        quotationData = await canopusRPA.generatePropertyQuotation(data);
       }
+
+      // Fechar navegador
+      await canopusRPA.close();
+
+      // Enviar cotação ao cliente
+      await whatsappService.sendQuotation(phone, quotationData);
+
+      // Atualizar sessão
+      sessionService.updateSession(phone, {
+        state: 'COMPLETED',
+        quotation: quotationData
+      });
+
+      console.log('✅ Cotação enviada com sucesso (scraping em tempo real)!');
 
     } catch (error) {
       console.error('❌ Erro ao gerar cotação:', error);

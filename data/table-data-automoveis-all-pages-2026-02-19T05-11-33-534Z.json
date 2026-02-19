@@ -1,6 +1,6 @@
 {
-  "extractedAt": "2026-01-20T05:55:38.832Z",
-  "totalPages": 20,
+  "extractedAt": "2026-02-19T05:11:33.534Z",
+  "totalPages": 21,
   "headers": [
     "NOME DO BEM",
     "VALOR",
@@ -10,7 +10,7 @@
     "TIPO DE VENDA",
     ""
   ],
-  "totalRows": 181,
+  "totalRows": 199,
   "earlyTermination": false,
   "bestMatch": null,
   "rows": [
@@ -330,6 +330,15 @@
       "coluna_7": ""
     },
     {
+      "NOME DO BEM": "CR5601 - AUTOMÓVEL MÉDIO 50% - R$ 51.000,00",
+      "VALOR": "R$ 51.000,00",
+      "PRAZO": "106",
+      "1ª PARCELA": "R$ 370,58",
+      "PLANO": "40 - PLANO EXCLUSIVO 50%",
+      "TIPO DE VENDA": "71 - PARCELA LINEAR",
+      "coluna_7": ""
+    },
+    {
       "NOME DO BEM": "CR5429 - AUTOMÓVEL MÉDIO 70% - R$ 51.000,00",
       "VALOR": "R$ 51.000,00",
       "PRAZO": "106",
@@ -366,12 +375,57 @@
       "coluna_7": ""
     },
     {
+      "NOME DO BEM": "CR5429 - AUTOMÓVEL MÉDIO 70% - R$ 51.000,00",
+      "VALOR": "R$ 51.000,00",
+      "PRAZO": "106",
+      "1ª PARCELA": "R$ 466,76",
+      "PLANO": "21 - PLANO EXCLUSIVO 70%",
+      "TIPO DE VENDA": "71 - PARCELA LINEAR",
+      "coluna_7": ""
+    },
+    {
       "NOME DO BEM": "CR5171 - AUTOMOVEL MÉDIO E UTILITARIO R$ 51.000,00",
       "VALOR": "R$ 51.000,00",
       "PRAZO": "106",
       "1ª PARCELA": "R$ 611,14",
       "PLANO": "3000 - GRUPO 3000 PARTICIPANTES",
       "TIPO DE VENDA": "114 - LINEAR",
+      "coluna_7": ""
+    },
+    {
+      "NOME DO BEM": "CR5171 - AUTOMOVEL MÉDIO E UTILITARIO R$ 51.000,00",
+      "VALOR": "R$ 51.000,00",
+      "PRAZO": "106",
+      "1ª PARCELA": "R$ 611,14",
+      "PLANO": "3000 - GRUPO 3000 PARTICIPANTES",
+      "TIPO DE VENDA": "71 - PARCELA LINEAR",
+      "coluna_7": ""
+    },
+    {
+      "NOME DO BEM": "CR5602 - AUTOMÓVEL MÉDIO 50% - R$ 60.000,00",
+      "VALOR": "R$ 60.000,00",
+      "PRAZO": "106",
+      "1ª PARCELA": "R$ 435,96",
+      "PLANO": "40 - PLANO EXCLUSIVO 50%",
+      "TIPO DE VENDA": "71 - PARCELA LINEAR",
+      "coluna_7": ""
+    },
+    {
+      "NOME DO BEM": "CR5188 - AUTOMÓVEL MÉDIO E UTILITÁRIO - R$ 60.000,00",
+      "VALOR": "R$ 60.000,00",
+      "PRAZO": "106",
+      "1ª PARCELA": "R$ 718,98",
+      "PLANO": "3000 - GRUPO 3000 PARTICIPANTES",
+      "TIPO DE VENDA": "71 - PARCELA LINEAR",
+      "coluna_7": ""
+    },
+    {
+      "NOME DO BEM": "CR5437 - AUTOMÓVEL MÉDIO 70% - R$ 60.000,00",
+      "VALOR": "R$ 60.000,00",
+      "PRAZO": "106",
+      "1ª PARCELA": "R$ 549,12",
+      "PLANO": "21 - PLANO EXCLUSIVO 70%",
+      "TIPO DE VENDA": "71 - PARCELA LINEAR",
       "coluna_7": ""
     },
     {
@@ -432,6 +486,15 @@
       "NOME DO BEM": "CR5425 - AUTOMÓVEL MÉDIO 70% - R$ 70.000,00",
       "VALOR": "R$ 70.000,00",
       "PRAZO": "106",
+      "1ª PARCELA": "R$ 640,64",
+      "PLANO": "21 - PLANO EXCLUSIVO 70%",
+      "TIPO DE VENDA": "71 - PARCELA LINEAR",
+      "coluna_7": ""
+    },
+    {
+      "NOME DO BEM": "CR5425 - AUTOMÓVEL MÉDIO 70% - R$ 70.000,00",
+      "VALOR": "R$ 70.000,00",
+      "PRAZO": "106",
       "1ª PARCELA": "R$ 1.334,06",
       "PLANO": "21 - PLANO EXCLUSIVO 70%",
       "TIPO DE VENDA": "61 - PARCELA GRADUAL",
@@ -443,6 +506,24 @@
       "PRAZO": "106",
       "1ª PARCELA": "R$ 640,64",
       "PLANO": "21 - PLANO EXCLUSIVO 70%",
+      "TIPO DE VENDA": "71 - PARCELA LINEAR",
+      "coluna_7": ""
+    },
+    {
+      "NOME DO BEM": "CR5603 - AUTOMÓVEL MÉDIO 50% - R$ 70.000,00",
+      "VALOR": "R$ 70.000,00",
+      "PRAZO": "106",
+      "1ª PARCELA": "R$ 508,62",
+      "PLANO": "40 - PLANO EXCLUSIVO 50%",
+      "TIPO DE VENDA": "71 - PARCELA LINEAR",
+      "coluna_7": ""
+    },
+    {
+      "NOME DO BEM": "CR5004 - AUTOMOVEL MÉDIO E UTILITARIO R$ 70.000,00",
+      "VALOR": "R$ 70.000,00",
+      "PRAZO": "106",
+      "1ª PARCELA": "R$ 838,81",
+      "PLANO": "3000 - GRUPO 3000 PARTICIPANTES",
       "TIPO DE VENDA": "71 - PARCELA LINEAR",
       "coluna_7": ""
     },
@@ -501,12 +582,39 @@
       "coluna_7": ""
     },
     {
+      "NOME DO BEM": "CR5438 - AUTOMÓVEL MÉDIO 70% - R$ 80.000,00",
+      "VALOR": "R$ 80.000,00",
+      "PRAZO": "106",
+      "1ª PARCELA": "R$ 732,17",
+      "PLANO": "21 - PLANO EXCLUSIVO 70%",
+      "TIPO DE VENDA": "71 - PARCELA LINEAR",
+      "coluna_7": ""
+    },
+    {
+      "NOME DO BEM": "CR5172 - AUTOMÓVEL MÉDIO E UTILITÁRIO - R$ 80.000,00",
+      "VALOR": "R$ 80.000,00",
+      "PRAZO": "106",
+      "1ª PARCELA": "R$ 958,65",
+      "PLANO": "3000 - GRUPO 3000 PARTICIPANTES",
+      "TIPO DE VENDA": "71 - PARCELA LINEAR",
+      "coluna_7": ""
+    },
+    {
       "NOME DO BEM": "CR5172 - AUTOMÓVEL MÉDIO E UTILITÁRIO - R$ 80.000,00",
       "VALOR": "R$ 80.000,00",
       "PRAZO": "106",
       "1ª PARCELA": "R$ 958,65",
       "PLANO": "3000 - GRUPO 3000 PARTICIPANTES",
       "TIPO DE VENDA": "114 - LINEAR",
+      "coluna_7": ""
+    },
+    {
+      "NOME DO BEM": "CR5604 - AUTOMÓVEL MÉDIO 50% - R$ 80.000,00",
+      "VALOR": "R$ 80.000,00",
+      "PRAZO": "106",
+      "1ª PARCELA": "R$ 581,29",
+      "PLANO": "40 - PLANO EXCLUSIVO 50%",
+      "TIPO DE VENDA": "71 - PARCELA LINEAR",
       "coluna_7": ""
     },
     {
@@ -558,9 +666,36 @@
       "NOME DO BEM": "CR5439 - AUTOMÓVEL MÉDIO 70% - R$ 90.000,00",
       "VALOR": "R$ 90.000,00",
       "PRAZO": "106",
+      "1ª PARCELA": "R$ 823,69",
+      "PLANO": "21 - PLANO EXCLUSIVO 70%",
+      "TIPO DE VENDA": "71 - PARCELA LINEAR",
+      "coluna_7": ""
+    },
+    {
+      "NOME DO BEM": "CR5439 - AUTOMÓVEL MÉDIO 70% - R$ 90.000,00",
+      "VALOR": "R$ 90.000,00",
+      "PRAZO": "106",
       "1ª PARCELA": "R$ 1.715,23",
       "PLANO": "21 - PLANO EXCLUSIVO 70%",
       "TIPO DE VENDA": "61 - PARCELA GRADUAL",
+      "coluna_7": ""
+    },
+    {
+      "NOME DO BEM": "CR5605 - AUTOMÓVEL MÉDIO 50% - R$ 90.000,00",
+      "VALOR": "R$ 90.000,00",
+      "PRAZO": "106",
+      "1ª PARCELA": "R$ 653,95",
+      "PLANO": "40 - PLANO EXCLUSIVO 50%",
+      "TIPO DE VENDA": "71 - PARCELA LINEAR",
+      "coluna_7": ""
+    },
+    {
+      "NOME DO BEM": "CR5173 - AUTOMÓVEL MÉDIO E UTILITÁRIO - R$ 90.000,00",
+      "VALOR": "R$ 90.000,00",
+      "PRAZO": "106",
+      "1ª PARCELA": "R$ 1.078,48",
+      "PLANO": "3000 - GRUPO 3000 PARTICIPANTES",
+      "TIPO DE VENDA": "71 - PARCELA LINEAR",
       "coluna_7": ""
     },
     {
@@ -621,6 +756,15 @@
       "NOME DO BEM": "CR5606 - AUTOMÓVEL MÉDIO 50% - R$ 100.000,00",
       "VALOR": "R$ 100.000,00",
       "PRAZO": "106",
+      "1ª PARCELA": "R$ 726,61",
+      "PLANO": "40 - PLANO EXCLUSIVO 50%",
+      "TIPO DE VENDA": "71 - PARCELA LINEAR",
+      "coluna_7": ""
+    },
+    {
+      "NOME DO BEM": "CR5606 - AUTOMÓVEL MÉDIO 50% - R$ 100.000,00",
+      "VALOR": "R$ 100.000,00",
+      "PRAZO": "106",
       "1ª PARCELA": "R$ 1.717,11",
       "PLANO": "40 - PLANO EXCLUSIVO 50%",
       "TIPO DE VENDA": "61 - PARCELA GRADUAL",
@@ -633,6 +777,24 @@
       "1ª PARCELA": "R$ 1.905,81",
       "PLANO": "21 - PLANO EXCLUSIVO 70%",
       "TIPO DE VENDA": "61 - PARCELA GRADUAL",
+      "coluna_7": ""
+    },
+    {
+      "NOME DO BEM": "CR5009 - AUTOMÓVEL MÉDIO E UTILITÁRIO - R$ 100.000,00",
+      "VALOR": "R$ 100.000,00",
+      "PRAZO": "106",
+      "1ª PARCELA": "R$ 1.198,31",
+      "PLANO": "3000 - GRUPO 3000 PARTICIPANTES",
+      "TIPO DE VENDA": "71 - PARCELA LINEAR",
+      "coluna_7": ""
+    },
+    {
+      "NOME DO BEM": "CR5407 - AUTOMÓVEL MÉDIO E UTILITÁRIO (70%) - R$ 100.000,00",
+      "VALOR": "R$ 100.000,00",
+      "PRAZO": "106",
+      "1ª PARCELA": "R$ 915,21",
+      "PLANO": "21 - PLANO EXCLUSIVO 70%",
+      "TIPO DE VENDA": "71 - PARCELA LINEAR",
       "coluna_7": ""
     },
     {

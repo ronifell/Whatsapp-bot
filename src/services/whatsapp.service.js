@@ -465,22 +465,44 @@ Por favor, aguarde... 🤖`;
   }
 
   /**
+   * Envia mensagem amigável informando que o scraping levará 5-10 minutos
+   */
+  async sendScrapingWaitMessage(phone) {
+    const message = `⏳ *Gerando sua cotação personalizada...* 😊
+
+Estou coletando os dados mais atualizados para você!
+Este processo leva de 5 a 10 minutos para garantir que você receba informações precisas e atualizadas.
+
+Por favor, aguarde um momento enquanto preparo sua cotação... ⏱️✨`;
+
+    return this.sendMessage(phone, message);
+  }
+
+  /**
    * Envia cotação ao cliente
    */
   async sendQuotation(phone, quotationData) {
     const timestamp = new Date().toLocaleString('pt-BR');
     
+    // Verificar se é match exato ou similar
+    const isExactMatch = quotationData.isExactMatch !== false; // Default true se não especificado
+    const matchNote = isExactMatch 
+      ? '' 
+      : '\n\n💡 *Informação:*\nEncontrei o plano mais próximo do que você solicitou! Este é o melhor plano disponível em nosso sistema que se aproxima do seu pedido. Se precisar de ajustes ou tiver dúvidas, estou à disposição para ajudar! 😊';
+    
+    // Formatar mensagem com todos os campos exatamente como aparecem nos dados
+    // rawData é o objeto row completo do JSON
+    const row = quotationData.rawData || {};
     const message = `✅ *Cotação Gerada com Sucesso!*
 
 📋 *Detalhes da Cotação:*
 
-*Tipo:* ${quotationData.type}
-*Valor do Bem:* R$ ${quotationData.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-*Prazo:* ${quotationData.months} meses
-*Parcela Mensal:* R$ ${quotationData.monthlyPayment.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-*Taxa de Administração:* ${quotationData.adminFee}%
-
-${quotationData.details || ''}
+*NOME DO BEM:* ${row['NOME DO BEM'] || 'N/A'}
+*VALOR:* ${row['VALOR'] || 'N/A'}
+*PRAZO:* ${row['PRAZO'] || 'N/A'} meses
+*1ª PARCELA:* ${row['1ª PARCELA'] || 'N/A'}
+*PLANO:* ${row['PLANO'] || 'N/A'}
+*TIPO DE VENDA:* ${row['TIPO DE VENDA'] || 'N/A'}${matchNote}
 
 ---
 
@@ -495,12 +517,14 @@ Precisa de ajuda? Digite: *AJUDA*`;
       console.log('\n' + '═'.repeat(70));
       console.log(`💰 COTAÇÃO ENVIADA [${timestamp}]`);
       console.log('─'.repeat(70));
+      const row = quotationData.rawData || {};
       console.log(`👤 Para: ${phone}`);
-      console.log(`📊 Tipo: ${quotationData.type}`);
-      console.log(`💵 Valor: R$ ${quotationData.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`);
-      console.log(`📅 Prazo: ${quotationData.months} meses`);
-      console.log(`💳 Parcela: R$ ${quotationData.monthlyPayment.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`);
-      console.log(`📈 Taxa Admin: ${quotationData.adminFee}%`);
+      console.log(`📊 NOME DO BEM: ${row['NOME DO BEM'] || 'N/A'}`);
+      console.log(`💵 VALOR: ${row['VALOR'] || 'N/A'}`);
+      console.log(`📅 PRAZO: ${row['PRAZO'] || 'N/A'} meses`);
+      console.log(`💳 1ª PARCELA: ${row['1ª PARCELA'] || 'N/A'}`);
+      console.log(`📋 PLANO: ${row['PLANO'] || 'N/A'}`);
+      console.log(`🏷️  TIPO DE VENDA: ${row['TIPO DE VENDA'] || 'N/A'}`);
       console.log('═'.repeat(70) + '\n');
     }
 
