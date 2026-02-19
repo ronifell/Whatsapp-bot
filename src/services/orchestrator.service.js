@@ -874,7 +874,9 @@ class OrchestratorService {
       await whatsappService.sendScrapingWaitMessage(phone);
       
       // Inicializar navegador
-      await canopusRPA.initBrowser(false); // headless=false para debug, true em produção
+      // Usar headless=true em produção (Render não tem display), false em desenvolvimento
+      const isProduction = process.env.NODE_ENV === 'production';
+      await canopusRPA.initBrowser(isProduction);
 
       // Fazer login
       await canopusRPA.login();

@@ -23,7 +23,13 @@ class CanopusRPAService {
       
       this.browser = await chromium.launch({
         headless: headless,
-        args: ['--start-maximized']
+        args: [
+          '--start-maximized',
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu'
+        ]
       });
 
       this.context = await this.browser.newContext({
