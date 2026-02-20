@@ -2369,7 +2369,7 @@ class CanopusRPAService {
       }
 
       // Navegar para página de planos, selecionar IMOVEIS
-      console.log('📋 Acessando lista de planos (IMOVEIS)...');
+      console.log('📋 Acessando lista de planos...');
       await this.navigateToPlansListForImoveis();
 
       // Extrair TODOS os dados e salvar em um único arquivo JSON
