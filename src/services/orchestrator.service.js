@@ -1017,7 +1017,36 @@ class OrchestratorService {
       return;
     }
     
-    // SEGUNDO: Verificar se cliente quer ajustar valor da carta ou falar com consultor
+    // SEGUNDO: Verificar se cliente quer nova cotação com valores diferentes
+    const wantsNewQuote = messageUpper.includes('NOVA COTAÇÃO') || 
+                         messageUpper.includes('NOVA COTACAO') ||
+                         messageUpper.includes('SOLICITAR UMA NOVA') ||
+                         messageUpper.includes('VALORES DIFERENTES') ||
+                         messageUpper.includes('COTAÇÃO COM VALORES DIFERENTES') ||
+                         messageUpper.includes('COTACAO COM VALORES DIFERENTES') ||
+                         messageUpper.includes('REQUEST A NEW QUOTATION') ||
+                         messageUpper.includes('NEW QUOTE');
+    
+    if (wantsNewQuote) {
+      // Cliente quer uma nova cotação - solicitar dados novamente
+      console.log('✅ Cliente solicitou nova cotação com valores diferentes');
+      const consortiumType = session.consortiumType || 'CARRO'; // Default para CARRO se não houver tipo salvo
+      
+      sessionService.updateSession(phone, {
+        consortiumType: consortiumType,
+        state: 'AWAITING_DATA',
+        quotation: null // Limpar cotação anterior
+      });
+      
+      if (consortiumType === 'CARRO') {
+        await whatsappService.requestCarData(phone, message);
+      } else if (consortiumType === 'IMOVEL') {
+        await whatsappService.requestPropertyData(phone);
+      }
+      return;
+    }
+    
+    // TERCEIRO: Verificar se cliente quer ajustar valor da carta ou falar com consultor
     const wantsAdjustValue = messageUpper === '1' || messageUpper === '1️⃣' || 
                             messageUpper.includes('AJUSTAR') || messageUpper.includes('VALOR DA CARTA') ||
                             messageUpper.includes('AJUSTAR VALOR');
