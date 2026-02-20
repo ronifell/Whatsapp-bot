@@ -493,6 +493,32 @@ Por favor, aguarde um momento enquanto preparo sua cotação... ⏱️✨`;
   }
 
   /**
+   * Formata valor em "mil" quando apropriado
+   */
+  formatValueInMil(value) {
+    if (value >= 1000000) {
+      const milhoes = (value / 1000000).toFixed(1);
+      return milhoes.endsWith('.0') ? `${milhoes.replace('.0', '')} milhões` : `${milhoes} milhões`;
+    } else if (value >= 1000) {
+      const mil = (value / 1000).toFixed(0);
+      return `${mil} mil`;
+    }
+    return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  }
+
+  /**
+   * Calcula taxa aproximada baseada na primeira parcela e prazo
+   */
+  calculateTaxRate(primeiraParcela, valor, prazo) {
+    if (!primeiraParcela || !valor || !prazo) {
+      return null;
+    }
+    const totalPago = primeiraParcela * prazo;
+    const taxa = ((totalPago - valor) / valor) * 100;
+    return taxa.toFixed(2);
+  }
+
+  /**
    * Envia cotação ao cliente
    */
   async sendQuotation(phone, quotationData) {
@@ -500,23 +526,38 @@ Por favor, aguarde um momento enquanto preparo sua cotação... ⏱️✨`;
     
     // Verificar se é match exato ou similar
     const isExactMatch = quotationData.isExactMatch !== false; // Default true se não especificado
-    const matchNote = isExactMatch 
-      ? '' 
-      : '\n\n💡 *Informação:*\nEncontrei o plano mais próximo do que você solicitou! Este é o melhor plano disponível em nosso sistema que se aproxima do seu pedido. Se precisar de ajustes ou tiver dúvidas, estou à disposição para ajudar! 😊';
     
     // Formatar mensagem com todos os campos exatamente como aparecem nos dados
     // rawData é o objeto row completo do JSON
     const row = quotationData.rawData || {};
-    const message = `✅ *Cotação Gerada com Sucesso!*
+    const requestedValue = quotationData.requestedValue || 0;
+    const requestedTerm = quotationData.requestedTerm || 0;
+    
+    // Extrair valores numéricos
+    const planValue = parseFloat((row['VALOR'] || '').replace(/[^\d,]/g, '').replace(',', '.'));
+    const planTerm = parseInt((row['PRAZO'] || '').replace(/\D/g, ''));
+    const primeiraParcela = parseFloat((row['1ª PARCELA'] || '').replace(/[^\d,]/g, '').replace(',', '.'));
+    
+    // Calcular taxa
+    const taxa = this.calculateTaxRate(primeiraParcela, planValue, planTerm);
+    const taxaText = taxa ? `${taxa}%` : 'N/A';
+    
+    // Formatar valor para mensagem
+    const valorFormatado = row['VALOR'] || 'N/A';
+    const valorEmMil = planValue ? this.formatValueInMil(planValue) : 'N/A';
+    
+    let message = '';
+    
+    if (isExactMatch) {
+      // Match exato - mensagem simples
+      message = `✅ *Cotação Gerada com Sucesso!*
 
 📋 *Detalhes da Cotação:*
 
-*NOME DO BEM:* ${row['NOME DO BEM'] || 'N/A'}
-*VALOR:* ${row['VALOR'] || 'N/A'}
-*PRAZO:* ${row['PRAZO'] || 'N/A'} meses
-*1ª PARCELA:* ${row['1ª PARCELA'] || 'N/A'}
-*PLANO:* ${row['PLANO'] || 'N/A'}
-*TIPO DE VENDA:* ${row['TIPO DE VENDA'] || 'N/A'}${matchNote}
+*Valor da carta:* ${valorFormatado}
+*Prazo:* ${planTerm || row['PRAZO'] || 'N/A'} meses
+*Parcela:* ${row['1ª PARCELA'] || 'N/A'}
+*Taxa:* ${taxaText}
 
 ---
 
@@ -525,6 +566,23 @@ Por favor, aguarde um momento enquanto preparo sua cotação... ⏱️✨`;
 Para *prosseguir com o fechamento*, digite: *FECHAR*
 
 Precisa de ajuda? Digite: *AJUDA*`;
+    } else {
+      // Não é match exato - usar formato solicitado
+      message = `A proposta mais próxima disponível é de ${valorEmMil}.
+
+Segue a simulação para você ter uma referência:
+
+*Valor da carta:* ${valorFormatado}
+*Prazo:* ${planTerm || row['PRAZO'] || 'N/A'} meses
+*Parcela:* ${row['1ª PARCELA'] || 'N/A'}
+*Taxa:* ${taxaText}
+
+Peço desculpas pela diferença.
+
+Você prefere:
+1️⃣ Ajustar o valor da carta
+2️⃣ Falar com um consultor`;
+    }
 
     // Log especial para cotações
     if (!this.isFrontendUser(phone) && !this.isTestMode()) {
@@ -539,8 +597,46 @@ Precisa de ajuda? Digite: *AJUDA*`;
       console.log(`💳 1ª PARCELA: ${row['1ª PARCELA'] || 'N/A'}`);
       console.log(`📋 PLANO: ${row['PLANO'] || 'N/A'}`);
       console.log(`🏷️  TIPO DE VENDA: ${row['TIPO DE VENDA'] || 'N/A'}`);
+      console.log(`✅ Match Exato: ${isExactMatch ? 'SIM' : 'NÃO'}`);
+      if (!isExactMatch) {
+        console.log(`📈 Plano Maior Disponível: ${hasHigherValue ? 'SIM' : 'NÃO'}`);
+        console.log(`📉 Plano Menor Disponível: ${hasLowerValue ? 'SIM' : 'NÃO'}`);
+      }
       console.log('═'.repeat(70) + '\n');
     }
+
+    return this.sendMessage(phone, message);
+  }
+  
+  /**
+   * Envia cotação alternativa (maior ou menor)
+   */
+  async sendAlternativeQuotation(phone, alternativePlan, type, requestedValue, requestedTerm) {
+    const row = alternativePlan || {};
+    const planValue = parseFloat((row['VALOR'] || '').replace(/[^\d,]/g, '').replace(',', '.'));
+    
+    const typeText = type === 'higher' ? 'maior' : 'menor';
+    const diffPercent = ((planValue - requestedValue) / requestedValue * 100).toFixed(1);
+    const diffText = type === 'higher' 
+      ? `(${diffPercent}% acima do solicitado)`
+      : `(${Math.abs(diffPercent)}% abaixo do solicitado)`;
+    
+    const message = `📋 *Cotação com Valor ${typeText.charAt(0).toUpperCase() + typeText.slice(1)}:*
+
+*NOME DO BEM:* ${row['NOME DO BEM'] || 'N/A'}
+*VALOR:* ${row['VALOR'] || 'N/A'} ${diffText}
+*PRAZO:* ${row['PRAZO'] || 'N/A'} meses
+*1ª PARCELA:* ${row['1ª PARCELA'] || 'N/A'}
+*PLANO:* ${row['PLANO'] || 'N/A'}
+*TIPO DE VENDA:* ${row['TIPO DE VENDA'] || 'N/A'}
+
+---
+
+*O que deseja fazer?*
+
+• Digite *FECHAR* para prosseguir com esta cotação
+• Digite *CONSULTOR* para falar com um consultor
+• Digite *AJUDA* se precisar de ajuda`;
 
     return this.sendMessage(phone, message);
   }

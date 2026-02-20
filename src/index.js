@@ -324,16 +324,49 @@ app.get('/api/frontend/messages/:phone/stream', (req, res) => {
     }, 30000); // ping a cada 30 segundos
 
     // Limpar ao desconectar
+    // Note: messageBus.registerSSE already sets up res.on('close') handler
+    // We only need to handle req events and cleanup ping interval
+    let isCleanedUp = false;
+    
+    const cleanup = () => {
+      if (isCleanedUp) return;
+      isCleanedUp = true;
+      clearInterval(pingInterval);
+    };
+
     req.on('close', () => {
       console.log(`🔌 SSE connection closed for ${phone}`);
-      clearInterval(pingInterval);
-      messageBus.unregisterSSE(phone, res);
+      cleanup();
+    });
+
+    req.on('aborted', () => {
+      console.log(`🔌 SSE connection aborted for ${phone}`);
+      cleanup();
     });
 
     req.on('error', (error) => {
-      console.error(`❌ SSE connection error for ${phone}:`, error);
-      clearInterval(pingInterval);
-      messageBus.unregisterSSE(phone, res);
+      // ECONNRESET is normal when client disconnects - don't log as error
+      if (error.code === 'ECONNRESET') {
+        console.log(`🔌 SSE connection reset by client for ${phone}`);
+      } else {
+        console.error(`❌ SSE connection error for ${phone}:`, error);
+      }
+      cleanup();
+    });
+
+    // Also handle response close/error events
+    res.on('close', () => {
+      cleanup();
+    });
+
+    res.on('error', (error) => {
+      // ECONNRESET is normal when client disconnects - don't log as error
+      if (error.code === 'ECONNRESET') {
+        console.log(`🔌 SSE response reset by client for ${phone}`);
+      } else {
+        console.error(`❌ SSE response error for ${phone}:`, error);
+      }
+      cleanup();
     });
 
   } catch (error) {

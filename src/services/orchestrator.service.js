@@ -938,7 +938,141 @@ class OrchestratorService {
    * Trata mensagens após cotação enviada
    */
   async handlePostQuotation(phone, message, session) {
-    // PRIMEIRO: Verificar se a mensagem contém dados completos de cotação
+    // PRIMEIRO: Verificar se cliente quer ver cotações alternativas (maior/menor)
+    const messageUpper = message.toUpperCase().trim();
+    const wantsHigher = messageUpper === 'MAIOR' || messageUpper.includes('MAIOR') || 
+                       messageUpper.includes('VALOR MAIOR') || messageUpper.includes('MAIS ALTO');
+    const wantsLower = messageUpper === 'MENOR' || messageUpper.includes('MENOR') || 
+                      messageUpper.includes('VALOR MENOR') || messageUpper.includes('MAIS BAIXO');
+    
+    if (wantsHigher || wantsLower) {
+      const quotation = session.quotation;
+      if (!quotation || !quotation.alternativePlans) {
+        const preferredLanguage = session.preferredLanguage || 'pt';
+        const errorMsg = preferredLanguage === 'en'
+          ? 'Sorry, I don\'t have alternative quotations available at the moment. Would you like to speak with a consultant?'
+          : 'Desculpe, não tenho cotações alternativas disponíveis no momento. Gostaria de falar com um consultor?';
+        await whatsappService.sendMessage(phone, errorMsg);
+        sessionService.addToHistory(phone, errorMsg, 'bot');
+        return;
+      }
+      
+      const alternativePlans = quotation.alternativePlans;
+      const requestedValue = quotation.requestedValue;
+      const requestedTerm = quotation.requestedTerm;
+      
+      if (wantsHigher && alternativePlans.higherValue) {
+        await whatsappService.sendAlternativeQuotation(
+          phone, 
+          alternativePlans.higherValue, 
+          'higher',
+          requestedValue,
+          requestedTerm
+        );
+        sessionService.addToHistory(phone, 
+          `Cotação alternativa (maior) enviada: ${alternativePlans.higherValue['VALOR'] || 'N/A'}`,
+          'bot'
+        );
+        // Atualizar cotação atual na sessão para a alternativa
+        sessionService.updateSession(phone, {
+          quotation: {
+            ...quotation,
+            rawData: alternativePlans.higherValue,
+            isExactMatch: false
+          }
+        });
+        return;
+      }
+      
+      if (wantsLower && alternativePlans.lowerValue) {
+        await whatsappService.sendAlternativeQuotation(
+          phone, 
+          alternativePlans.lowerValue, 
+          'lower',
+          requestedValue,
+          requestedTerm
+        );
+        sessionService.addToHistory(phone, 
+          `Cotação alternativa (menor) enviada: ${alternativePlans.lowerValue['VALOR'] || 'N/A'}`,
+          'bot'
+        );
+        // Atualizar cotação atual na sessão para a alternativa
+        sessionService.updateSession(phone, {
+          quotation: {
+            ...quotation,
+            rawData: alternativePlans.lowerValue,
+            isExactMatch: false
+          }
+        });
+        return;
+      }
+      
+      // Cliente pediu alternativa mas não está disponível
+      const preferredLanguage = session.preferredLanguage || 'pt';
+      const notAvailableMsg = preferredLanguage === 'en'
+        ? `Sorry, I don't have a ${wantsHigher ? 'higher' : 'lower'} value quotation available. Would you like to speak with a consultant?`
+        : `Desculpe, não tenho uma cotação com valor ${wantsHigher ? 'maior' : 'menor'} disponível. Gostaria de falar com um consultor?`;
+      await whatsappService.sendMessage(phone, notAvailableMsg);
+      sessionService.addToHistory(phone, notAvailableMsg, 'bot');
+      return;
+    }
+    
+    // SEGUNDO: Verificar se cliente quer ajustar valor da carta ou falar com consultor
+    const wantsAdjustValue = messageUpper === '1' || messageUpper === '1️⃣' || 
+                            messageUpper.includes('AJUSTAR') || messageUpper.includes('VALOR DA CARTA') ||
+                            messageUpper.includes('AJUSTAR VALOR');
+    const wantsConsultant = messageUpper === '2' || messageUpper === '2️⃣' || 
+                           messageUpper === 'CONSULTOR' || messageUpper.includes('CONSULTOR') || 
+                           messageUpper.includes('FALAR COM') || messageUpper.includes('ATENDENTE');
+    
+    if (wantsAdjustValue) {
+      // Cliente quer ajustar valor - oferecer opções de cotações alternativas ou nova cotação
+      const quotation = session.quotation;
+      const alternativePlans = quotation?.alternativePlans || {};
+      const hasHigherValue = alternativePlans.higherValue !== null && alternativePlans.higherValue !== undefined;
+      const hasLowerValue = alternativePlans.lowerValue !== null && alternativePlans.lowerValue !== undefined;
+      
+      const preferredLanguage = session.preferredLanguage || 'pt';
+      let adjustMsg = preferredLanguage === 'en'
+        ? 'I can help you adjust the value. You can:\n\n'
+        : 'Posso ajudar você a ajustar o valor. Você pode:\n\n';
+      
+      if (hasHigherValue || hasLowerValue) {
+        adjustMsg += preferredLanguage === 'en'
+          ? '• See a quotation with a *higher* value (type *MAIOR*)\n'
+          : '• Ver uma cotação com valor *maior* (digite *MAIOR*)\n';
+        adjustMsg += preferredLanguage === 'en'
+          ? '• See a quotation with a *lower* value (type *MENOR*)\n'
+          : '• Ver uma cotação com valor *menor* (digite *MENOR*)\n';
+      }
+      
+      adjustMsg += preferredLanguage === 'en'
+        ? '• Request a new quotation with different values\n'
+        : '• Solicitar uma nova cotação com valores diferentes\n';
+      adjustMsg += preferredLanguage === 'en'
+        ? '• Speak with a consultant for personalized assistance (type *CONSULTOR*)'
+        : '• Falar com um consultor para assistência personalizada (digite *CONSULTOR*)';
+      
+      await whatsappService.sendMessage(phone, adjustMsg);
+      sessionService.addToHistory(phone, adjustMsg, 'bot');
+      return;
+    }
+    
+    if (wantsConsultant) {
+      await this.requestHumanConfirmation(
+        phone,
+        'Cliente solicitou falar com consultor após ver cotação',
+        {
+          quotation: session.quotation,
+          customerData: session.data,
+          message: message
+        },
+        session
+      );
+      return;
+    }
+    
+    // TERCEIRO: Verificar se a mensagem contém dados completos de cotação
     // Isso é crítico para capturar mensagens que seguem o formato esperado
     // mesmo que não sejam explicitamente detectadas como QUOTE_REQUEST
     const hasCompleteDataFormat = this.looksLikeCompleteQuoteData(message);

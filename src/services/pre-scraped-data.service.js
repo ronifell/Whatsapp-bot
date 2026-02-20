@@ -22,11 +22,8 @@ class PreScrapedDataService {
         customerValue.toString().replace(/[^\d,]/g, '').replace(',', '.')
       );
 
-      // Procurar o plano mais próximo (sem restrições de diferença)
-      let bestMatch = null;
-      let smallestDifference = Infinity;
-      let bestValueDifference = Infinity;
-      let bestTermDifference = Infinity;
+      // STEP 1: Find all plans and calculate budget differences (ignoring period)
+      const validPlans = [];
 
       for (const row of scrapedData.rows) {
         try {
@@ -50,49 +47,61 @@ class PreScrapedDataService {
             firstPaymentText.toString().replace(/[^\d,]/g, '').replace(',', '.')
           );
 
-          // Calcular diferenças (sem restrições)
+          // Calcular diferença de valor (budget) - IGNORANDO o período
           const valueDifference = Math.abs(planValue - cleanCustomerValue);
           const termDifference = Math.abs(planTerm - customerTerm);
-          
-          // Calcular diferença total (peso maior para diferença de valor)
-          // Usar percentual de diferença para normalizar
-          const valuePercentDiff = (valueDifference / cleanCustomerValue) * 100;
-          const termPercentDiff = (termDifference / customerTerm) * 100;
-          const totalDifference = valuePercentDiff * 1000 + termPercentDiff * 100; // Peso maior para valor
 
-          // Sempre encontrar o melhor match (sem restrições)
-          if (totalDifference < smallestDifference) {
-            smallestDifference = totalDifference;
-            bestValueDifference = valueDifference;
-            bestTermDifference = termDifference;
-            bestMatch = {
-              nomeBem: row['NOME DO BEM'] || row['Nome do bem'] || row['nome_bem'] || '',
-              valor: planValue,
-              prazo: planTerm,
-              primeiraParcela: firstPayment || 0,
-              plano: row['PLANO'] || row['Plano'] || row['plano'] || '',
-              tipoVenda: row['TIPO DE VENDA'] || row['Tipo de Venda'] || row['tipo_venda'] || '',
-              rawData: row,
-              valueDifference: valueDifference,
-              termDifference: termDifference,
-              isExactMatch: valueDifference === 0 && termDifference === 0
-            };
-          }
+          validPlans.push({
+            nomeBem: row['NOME DO BEM'] || row['Nome do bem'] || row['nome_bem'] || '',
+            valor: planValue,
+            prazo: planTerm,
+            primeiraParcela: firstPayment || 0,
+            plano: row['PLANO'] || row['Plano'] || row['plano'] || '',
+            tipoVenda: row['TIPO DE VENDA'] || row['Tipo de Venda'] || row['tipo_venda'] || '',
+            rawData: row,
+            valueDifference: valueDifference,
+            termDifference: termDifference,
+            isExactMatch: valueDifference === 0 && termDifference === 0
+          });
         } catch (e) {
           // Continuar se houver erro ao processar uma linha
           continue;
         }
       }
 
+      if (validPlans.length === 0) {
+        return null;
+      }
+
+      // STEP 2: Find the smallest budget difference
+      const smallestBudgetDifference = Math.min(...validPlans.map(p => p.valueDifference));
+
+      // STEP 3: Filter plans with the smallest budget difference
+      const plansWithBestBudget = validPlans.filter(p => p.valueDifference === smallestBudgetDifference);
+
+      // STEP 4: If multiple plans have the same budget difference, find the one with most similar period
+      let bestMatch;
+      if (plansWithBestBudget.length === 1) {
+        bestMatch = plansWithBestBudget[0];
+      } else {
+        // Among plans with same budget, find the one with smallest period difference
+        const smallestPeriodDifference = Math.min(...plansWithBestBudget.map(p => p.termDifference));
+        bestMatch = plansWithBestBudget.find(p => p.termDifference === smallestPeriodDifference);
+      }
+
       // Adicionar informações sobre a qualidade do match
       if (bestMatch) {
         bestMatch.matchQuality = {
-          valueDifference: bestValueDifference,
-          termDifference: bestTermDifference,
+          valueDifference: bestMatch.valueDifference,
+          termDifference: bestMatch.termDifference,
           isExactMatch: bestMatch.isExactMatch,
           requestedValue: cleanCustomerValue,
           requestedTerm: customerTerm
         };
+        // Remove helper properties before returning
+        delete bestMatch.valueDifference;
+        delete bestMatch.termDifference;
+        delete bestMatch.isExactMatch;
       }
 
       return bestMatch;

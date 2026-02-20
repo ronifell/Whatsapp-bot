@@ -68,11 +68,36 @@ class MessageBusService {
     this.sseConnections.get(phone).add(res);
 
     // Send initial connection message
-    res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
+    try {
+      if (!res.writableEnded && !res.destroyed) {
+        res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
+      }
+    } catch (error) {
+      // Connection already closed, unregister immediately
+      if (error.code === 'ECONNRESET' || error.code === 'EPIPE') {
+        this.unregisterSSE(phone, res);
+        return;
+      }
+      throw error;
+    }
 
-    // Cleanup on disconnect
-    res.on('close', () => {
-      this.unregisterSSE(phone, res);
+    // Cleanup on disconnect - use once to avoid duplicate calls
+    let isUnregistered = false;
+    const unregisterOnce = () => {
+      if (!isUnregistered) {
+        isUnregistered = true;
+        this.unregisterSSE(phone, res);
+      }
+    };
+
+    res.once('close', unregisterOnce);
+    res.once('finish', unregisterOnce);
+    res.once('error', (error) => {
+      // ECONNRESET is normal when client disconnects - don't log as error
+      if (error.code !== 'ECONNRESET' && error.code !== 'EPIPE') {
+        console.error(`❌ SSE response error in messageBus for ${phone}:`, error);
+      }
+      unregisterOnce();
     });
 
     console.log(`🔌 SSE connection registered for ${phone}`);
@@ -83,13 +108,13 @@ class MessageBusService {
    */
   unregisterSSE(phone, res) {
     const connections = this.sseConnections.get(phone);
-    if (connections) {
+    if (connections && connections.has(res)) {
       connections.delete(res);
       if (connections.size === 0) {
         this.sseConnections.delete(phone);
       }
+      console.log(`🔌 SSE connection unregistered for ${phone}`);
     }
-    console.log(`🔌 SSE connection unregistered for ${phone}`);
   }
 
   /**

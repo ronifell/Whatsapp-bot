@@ -814,10 +814,8 @@ class CanopusRPAService {
       await table.waitFor({ state: 'visible', timeout: 30000 });
       await this.page.waitForTimeout(3000);
       
-      // Scrape e salvar dados do grid-body
-      console.log('📊 Extraindo dados do grid...');
-      await this.scrapeAndSaveGridData(null, null, false, 'automoveis');
-      console.log('✅ Dados extraídos e salvos com sucesso!');
+      // Não extrair dados aqui - a extração será feita em generateCarQuotation
+      // Isso evita criar múltiplos arquivos JSON
       
     } catch (error) {
       console.error('❌ Erro ao navegar para página de planos:', error.message);
@@ -864,10 +862,8 @@ class CanopusRPAService {
       await table.waitFor({ state: 'visible', timeout: 30000 });
       await this.page.waitForTimeout(3000);
       
-      // Scrape e salvar dados do grid-body
-      console.log('📊 Extraindo dados do grid (IMOVEIS)...');
-      await this.scrapeAndSaveGridData(null, null, false, 'imoveis');
-      console.log('✅ Dados extraídos e salvos com sucesso!');
+      // Não extrair dados aqui - a extração será feita em generatePropertyQuotation
+      // Isso evita criar múltiplos arquivos JSON
       
     } catch (error) {
       console.error('❌ Erro ao navegar para página de planos (IMOVEIS):', error.message);
@@ -1761,18 +1757,34 @@ class CanopusRPAService {
             if (customerValue && customerTerm && !earlyTermination) {
               const pageMatch = this.findBestMatchInPageData(pageData, customerValue, customerTerm);
               if (pageMatch) {
-                const valueDiff = pageMatch.valueDifference;
-                const termDiff = pageMatch.termDifference;
+                // Usar a mesma fórmula de cálculo para comparar matches entre páginas
+                const cleanCustomerValue = parseFloat(
+                  customerValue.toString().replace(/[^\d,]/g, '').replace(',', '.')
+                );
                 
-                // Atualizar melhor match se este for melhor
-                if (!bestMatchSoFar || 
-                    (bestMatchSoFar.valueDifference + bestMatchSoFar.termDifference * 1000) >
-                    (valueDiff + termDiff * 1000)) {
+                const currentValueDiff = pageMatch.valueDifference;
+                const currentTermDiff = pageMatch.termDifference;
+                const currentValuePercentDiff = (currentValueDiff / cleanCustomerValue) * 100;
+                const currentTermPercentDiff = Math.min((currentTermDiff / customerTerm) * 100, 50);
+                const currentTotalDiff = currentValuePercentDiff * 10000 + currentTermPercentDiff * 10;
+                
+                if (!bestMatchSoFar) {
                   bestMatchSoFar = pageMatch;
+                } else {
+                  const bestValueDiff = bestMatchSoFar.valueDifference;
+                  const bestTermDiff = bestMatchSoFar.termDifference;
+                  const bestValuePercentDiff = (bestValueDiff / cleanCustomerValue) * 100;
+                  const bestTermPercentDiff = Math.min((bestTermDiff / customerTerm) * 100, 50);
+                  const bestTotalDiff = bestValuePercentDiff * 10000 + bestTermPercentDiff * 10;
+                  
+                  // Atualizar melhor match se este for melhor (menor diferença total)
+                  if (currentTotalDiff < bestTotalDiff) {
+                    bestMatchSoFar = pageMatch;
+                  }
                 }
                 
                 // Verificar se encontrou match exato
-                if (valueDiff <= 100 && termDiff === 0) {
+                if (currentValueDiff <= 100 && currentTermDiff === 0) {
                   if (!exactMatchFound) {
                     console.log(`✅ Match exato encontrado na página ${currentPage}! Continuando por mais ${PAGES_AFTER_EXACT_MATCH} páginas para verificar melhor opção...`);
                     exactMatchFound = true;
@@ -2092,6 +2104,8 @@ class CanopusRPAService {
     const cleanCustomerValue = parseFloat(
       customerValue.toString().replace(/[^\d,]/g, '').replace(',', '.')
     );
+    
+    console.log(`🔍 [FIND BEST MATCH IN PAGE] Buscando para: R$ ${cleanCustomerValue.toLocaleString('pt-BR')}, ${customerTerm} meses (${pageData.rows.length} registros na página)`);
 
     let bestMatch = null;
     let smallestDifference = Infinity;
@@ -2121,33 +2135,49 @@ class CanopusRPAService {
         const termDifference = Math.abs(planTerm - customerTerm);
         const valueDifference = Math.abs(planValue - cleanCustomerValue);
         
-        // Calcular diferença total (sem restrições de prazo)
-        const valuePercentDiff = valueDifference / cleanCustomerValue;
-        const termPercentDiff = termDifference / customerTerm;
-        const totalDifference = valuePercentDiff * 1000 + termPercentDiff * 100;
+        // PRIORIZAR VALOR: Usar diferença absoluta de valor como fator principal
+        // Termo é usado apenas como tie-breaker quando valores são muito próximos
+        const valuePercentDiff = (valueDifference / cleanCustomerValue) * 100;
+        
+        // Limitar o impacto da diferença de prazo para que não domine o cálculo
+        // Se a diferença de prazo for muito grande (>50%), limitar sua contribuição
+        const termPercentDiff = Math.min((termDifference / customerTerm) * 100, 50);
+        
+          // Valor tem peso muito maior (10000x) para garantir que seja o fator principal
+          // Termo tem peso menor e limitado para ser apenas um tie-breaker
+          const totalDifference = valuePercentDiff * 10000 + termPercentDiff * 10;
 
-        if (totalDifference < smallestDifference) {
-          smallestDifference = totalDifference;
-          bestMatch = {
-            nomeBem: rowData['NOME DO BEM'] || rowData['Nome do bem'] || rowData['nome_bem'] || '',
-            valor: planValue,
-            valorTexto: rowData['VALOR'] || rowData['Valor'] || rowData['valor'] || '',
-            prazo: planTerm,
-            prazoTexto: rowData['PRAZO'] || rowData['Prazo'] || rowData['prazo'] || '',
-            primeiraParcela: firstPayment || 0,
-            primeiraParcelaTexto: rowData['1ª PARCELA'] || rowData['1ª parcela'] || rowData['primeira_parcela'] || '',
-            plano: rowData['PLANO'] || rowData['Plano'] || rowData['plano'] || '',
-            tipoVenda: rowData['TIPO DE VENDA'] || rowData['Tipo de Venda'] || rowData['tipo_venda'] || '',
-            rawData: rowData,
-            valueDifference: valueDifference,
-            termDifference: termDifference
-          };
-        }
+          // Debug: Log top candidates (only for values close to customer value)
+          if (valueDifference < cleanCustomerValue * 0.1 || planValue < cleanCustomerValue * 1.5) {
+            console.log(`🔍 [MATCH DEBUG] Valor: R$ ${planValue.toLocaleString('pt-BR')}, Prazo: ${planTerm}, ValueDiff: ${valuePercentDiff.toFixed(2)}%, TermDiff: ${termPercentDiff.toFixed(2)}%, Total: ${totalDifference.toFixed(2)}`);
+          }
+
+          if (totalDifference < smallestDifference) {
+            console.log(`✅ [MATCH UPDATE] Novo melhor match: R$ ${planValue.toLocaleString('pt-BR')} (diferença total: ${totalDifference.toFixed(2)})`);
+            smallestDifference = totalDifference;
+            bestMatch = {
+              nomeBem: rowData['NOME DO BEM'] || rowData['Nome do bem'] || rowData['nome_bem'] || '',
+              valor: planValue,
+              valorTexto: rowData['VALOR'] || rowData['Valor'] || rowData['valor'] || '',
+              prazo: planTerm,
+              prazoTexto: rowData['PRAZO'] || rowData['Prazo'] || rowData['prazo'] || '',
+              primeiraParcela: firstPayment || 0,
+              primeiraParcelaTexto: rowData['1ª PARCELA'] || rowData['1ª parcela'] || rowData['primeira_parcela'] || '',
+              plano: rowData['PLANO'] || rowData['Plano'] || rowData['plano'] || '',
+              tipoVenda: rowData['TIPO DE VENDA'] || rowData['Tipo de Venda'] || rowData['tipo_venda'] || '',
+              rawData: rowData,
+              valueDifference: valueDifference,
+              termDifference: termDifference
+            };
+          }
       } catch (e) {
         continue;
       }
     }
 
+    if (bestMatch) {
+      console.log(`🎯 [FINAL MATCH] Melhor match encontrado: R$ ${bestMatch.valor.toLocaleString('pt-BR')}, Prazo: ${bestMatch.prazo} meses`);
+    }
     return bestMatch;
   }
 
@@ -2155,6 +2185,7 @@ class CanopusRPAService {
    * Encontra o melhor plano baseado nos dados do cliente
    */
   findBestMatchingPlan(scrapedData, customerValue, customerTerm) {
+    console.log(`🔍 Buscando cotação para: R$ ${customerValue.toLocaleString('pt-BR')}, ${customerTerm} meses`);
     try {
       if (!scrapedData || !scrapedData.rows || scrapedData.rows.length === 0) {
         return null;
@@ -2165,61 +2196,76 @@ class CanopusRPAService {
         customerValue.toString().replace(/[^\d,]/g, '').replace(',', '.')
       );
 
-      // Procurar o plano mais próximo (sem restrições de diferença)
-      let bestMatch = null;
-      let smallestDifference = Infinity;
+      console.log(`📊 Analisando ${scrapedData.rows.length} cotações disponíveis`);
 
+      // STEP 1: Calcular diferenças de VALOR para todas as cotações
+      const quotesWithDifferences = [];
+      
       for (const row of scrapedData.rows) {
         try {
-          // Extrair valor do plano - usar nomes de campo do JSON
+          // Extrair VALOR da cotação
           const planValueText = row['VALOR'] || row['Valor'] || row['valor'] || '';
           const planValue = parseFloat(
             planValueText.toString().replace(/[^\d,]/g, '').replace(',', '.')
           );
 
-          // Extrair prazo do plano
+          if (isNaN(planValue) || planValue === 0) continue;
+
+          // Extrair PRAZO da cotação
           const planTermText = row['PRAZO'] || row['Prazo'] || row['prazo'] || '';
           const planTerm = parseInt(planTermText.toString().replace(/\D/g, ''));
 
-          // Extrair primeira parcela
-          const firstPaymentText = row['1ª PARCELA'] || row['1ª parcela'] || row['primeira_parcela'] || '';
-          const firstPayment = parseFloat(
-            firstPaymentText.toString().replace(/[^\d,]/g, '').replace(',', '.')
-          );
+          if (isNaN(planTerm) || planTerm === 0) continue;
 
-          // Calcular diferença total (sem restrições)
+          // Calcular diferença de VALOR (orçamento)
           const valueDifference = Math.abs(planValue - cleanCustomerValue);
+          // Calcular diferença de PRAZO (prazo)
           const termDifference = Math.abs(planTerm - customerTerm);
-          
-          // Usar peso maior para valor, mas considerar ambos
-          const valuePercentDiff = valueDifference / cleanCustomerValue;
-          const termPercentDiff = termDifference / customerTerm;
-          const totalDifference = valuePercentDiff * 1000 + termPercentDiff * 100;
 
-          if (totalDifference < smallestDifference) {
-            smallestDifference = totalDifference;
-            bestMatch = {
-              nomeBem: row['NOME DO BEM'] || row['Nome do bem'] || row['nome_bem'] || '',
-              valor: planValue,
-              valorTexto: row['VALOR'] || row['Valor'] || row['valor'] || '',
-              prazo: planTerm,
-              prazoTexto: row['PRAZO'] || row['Prazo'] || row['prazo'] || '',
-              primeiraParcela: firstPayment,
-              primeiraParcelaTexto: row['1ª PARCELA'] || row['1ª parcela'] || row['primeira_parcela'] || '',
-              plano: row['PLANO'] || row['Plano'] || row['plano'] || '',
-              tipoVenda: row['TIPO DE VENDA'] || row['Tipo de Venda'] || row['tipo_venda'] || '',
-              rawData: row
-            };
-          }
+          quotesWithDifferences.push({
+            quote: row, // Objeto da cotação original do JSON
+            planValue: planValue,
+            planTerm: planTerm,
+            valueDifference: valueDifference,
+            termDifference: termDifference
+          });
         } catch (e) {
           // Continuar se houver erro ao processar uma linha
           continue;
         }
       }
 
-      return bestMatch;
+      if (quotesWithDifferences.length === 0) {
+        console.log(`⚠️ Nenhuma cotação válida encontrada`);
+        return null;
+      }
+
+      // STEP 2: Encontrar a menor diferença de VALOR (cotação mais similar)
+      const smallestValueDifference = Math.min(...quotesWithDifferences.map(q => q.valueDifference));
+      console.log(`💰 Menor diferença de VALOR encontrada: R$ ${smallestValueDifference.toLocaleString('pt-BR')}`);
+
+      // STEP 3: Filtrar cotações com a menor diferença de VALOR
+      const quotesWithBestValue = quotesWithDifferences.filter(q => q.valueDifference === smallestValueDifference);
+      console.log(`📋 ${quotesWithBestValue.length} cotação(ões) com VALOR mais similar`);
+
+      // STEP 4: Se houver apenas uma cotação com melhor VALOR, retornar ela
+      // Se houver múltiplas cotações com o mesmo VALOR, encontrar a com PRAZO mais similar
+      let selectedQuote;
+      if (quotesWithBestValue.length === 1) {
+        selectedQuote = quotesWithBestValue[0].quote;
+        console.log(`✅ Única cotação com melhor VALOR selecionada`);
+      } else {
+        // Entre cotações com mesmo VALOR, encontrar a com menor diferença de PRAZO
+        const smallestTermDifference = Math.min(...quotesWithBestValue.map(q => q.termDifference));
+        const quoteWithBestTerm = quotesWithBestValue.find(q => q.termDifference === smallestTermDifference);
+        selectedQuote = quoteWithBestTerm.quote;
+        console.log(`✅ Entre ${quotesWithBestValue.length} cotações com mesmo VALOR, selecionada a com PRAZO mais similar (diferença: ${smallestTermDifference} meses)`);
+      }
+
+      console.log(`🎯 Cotação selecionada: VALOR ${selectedQuote['VALOR'] || 'N/A'}, PRAZO ${selectedQuote['PRAZO'] || 'N/A'}`);
+      return selectedQuote;
     } catch (error) {
-      console.error('❌ Erro ao encontrar melhor plano:', error.message);
+      console.error('❌ Erro ao encontrar melhor cotação:', error.message);
       return null;
     }
   }
@@ -2238,64 +2284,34 @@ class CanopusRPAService {
         await this.login();
       }
 
-      // Navegar para página de planos, selecionar AUTOMOVEIS e IPCA, e extrair dados
+      // Navegar para página de planos, selecionar AUTOMOVEIS e IPCA
       console.log('📋 Acessando lista de planos...');
       await this.navigateToPlansList();
 
-      // OTIMIZAÇÃO: Chamar scrapeAndSaveGridData com parâmetros de busca
-      console.log('🔍 Buscando plano correspondente durante extração...');
-      let extractionResult = null;
-      let bestPlan = null;
-      
+      // Extrair TODOS os dados e salvar em um único arquivo JSON
+      console.log('📊 Extraindo todos os dados disponíveis...');
+      let fullExtractionResult = null;
       try {
-        extractionResult = await this.scrapeAndSaveGridData(data.valor, data.prazo, true, 'automoveis');
+        fullExtractionResult = await this.scrapeAndSaveGridData(null, null, false, 'automoveis');
+        console.log(`✅ Extração completa! ${fullExtractionResult.rows.length} cotações extraídas e salvas em JSON`);
       } catch (error) {
-        console.warn('⚠️  Erro durante extração otimizada, tentando método tradicional...', error.message);
-        extractionResult = null;
+        console.error('❌ Erro durante extração completa:', error.message);
+        throw error;
       }
       
-      // Usar match encontrado durante extração se disponível
-      if (extractionResult && extractionResult.bestMatch && extractionResult.bestMatch.rawData) {
-        bestPlan = extractionResult.bestMatch.rawData; // Usar o objeto row completo diretamente
-        if (extractionResult.earlyTermination) {
-          console.log('⚡ Extração otimizada: parou cedo após encontrar match exato!');
-        } else {
-          console.log('✅ Melhor match encontrado durante extração');
-        }
-      }
-      
-      // Fallback: Se não encontrou durante extração, buscar nos dados salvos
-      if (!bestPlan) {
-        console.log('⚠️  Plano não encontrado durante extração, verificando dados salvos...');
-        const dataDir = path.join(process.cwd(), 'data');
-        
-        if (fs.existsSync(dataDir)) {
-          const files = fs.readdirSync(dataDir)
-            .filter(f => f.startsWith('table-data-automoveis-all-pages-') && f.endsWith('.json'))
-            .sort()
-            .reverse();
-
-          if (files.length > 0) {
-            const latestFile = path.join(dataDir, files[0]);
-            try {
-              const fileContent = fs.readFileSync(latestFile, 'utf-8');
-              const scrapedData = JSON.parse(fileContent);
-              
-              // Buscar o plano mais similar nos dados salvos
-              const match = this.findBestMatchingPlan(scrapedData, data.valor, data.prazo);
-              if (match && match.rawData) {
-                bestPlan = match.rawData; // Usar o objeto row completo diretamente
-                console.log('✅ Plano encontrado nos dados salvos');
-              }
-            } catch (e) {
-              console.warn('⚠️  Erro ao ler arquivo salvo:', e.message);
-            }
-          }
+      // Usar os dados extraídos para encontrar a melhor cotação
+      let bestPlan = null;
+      if (fullExtractionResult && fullExtractionResult.rows && fullExtractionResult.rows.length > 0) {
+        console.log(`🔍 Buscando melhor cotação em ${fullExtractionResult.rows.length} cotações disponíveis...`);
+        const match = this.findBestMatchingPlan(fullExtractionResult, data.valor, data.prazo);
+        if (match) {
+          bestPlan = match;
+          console.log('✅ Melhor cotação encontrada nos dados extraídos');
         }
       }
 
       if (!bestPlan) {
-        throw new Error('Não foi possível encontrar nenhum plano disponível nos dados. Por favor, tente novamente mais tarde.');
+        throw new Error('Não foi possível encontrar nenhuma cotação disponível nos dados. Por favor, tente novamente mais tarde.');
       }
 
       // Verificar se é match exato
@@ -2305,7 +2321,7 @@ class CanopusRPAService {
         (Math.abs(planValue - data.valor) < 0.01) && 
         (planTerm === data.prazo);
 
-      console.log('✅ Plano encontrado:');
+      console.log('✅ Cotação encontrada:');
       console.log(`   NOME DO BEM: ${bestPlan['NOME DO BEM'] || 'N/A'}`);
       console.log(`   VALOR: ${bestPlan['VALOR'] || 'N/A'}`);
       console.log(`   PRAZO: ${bestPlan['PRAZO'] || 'N/A'}`);
@@ -2352,79 +2368,34 @@ class CanopusRPAService {
         await this.login();
       }
 
-      // Navegar para página de planos, selecionar IMOVEIS (sem IPCA), e extrair dados
+      // Navegar para página de planos, selecionar IMOVEIS
       console.log('📋 Acessando lista de planos (IMOVEIS)...');
       await this.navigateToPlansListForImoveis();
 
-      // OTIMIZAÇÃO: Chamar scrapeAndSaveGridData com parâmetros de busca
-      console.log('🔍 Buscando plano correspondente durante extração...');
-      let extractionResult = null;
-      let bestPlan = null;
-      
+      // Extrair TODOS os dados e salvar em um único arquivo JSON
+      console.log('📊 Extraindo todos os dados disponíveis...');
+      let fullExtractionResult = null;
       try {
-        extractionResult = await this.scrapeAndSaveGridData(data.valor, data.prazo, true, 'imoveis');
+        fullExtractionResult = await this.scrapeAndSaveGridData(null, null, false, 'imoveis');
+        console.log(`✅ Extração completa! ${fullExtractionResult.rows.length} cotações extraídas e salvas em JSON`);
       } catch (error) {
-        console.warn('⚠️  Erro durante extração otimizada, tentando método tradicional...', error.message);
-        extractionResult = null;
+        console.error('❌ Erro durante extração completa:', error.message);
+        throw error;
       }
       
-      // Usar match encontrado durante extração se disponível
-      if (extractionResult && extractionResult.bestMatch) {
-        const match = extractionResult.bestMatch;
-        // Garantir que rawData é o objeto original da linha, não o objeto processado
-        const originalRow = match.rawData || match;
-        bestPlan = {
-          nomeBem: match.nomeBem || originalRow['NOME DO BEM'] || '',
-          valor: match.valor,
-          valorTexto: originalRow['VALOR'] || match.valorTexto || '',
-          prazo: match.prazo,
-          prazoTexto: originalRow['PRAZO'] || match.prazoTexto || '',
-          primeiraParcela: match.primeiraParcela,
-          primeiraParcelaTexto: originalRow['1ª PARCELA'] || match.primeiraParcelaTexto || '',
-          plano: originalRow['PLANO'] || match.plano || '',
-          tipoVenda: originalRow['TIPO DE VENDA'] || match.tipoVenda || '',
-          rawData: originalRow // Garantir que rawData é o objeto original da linha
-        };
-        
-        if (extractionResult.earlyTermination) {
-          console.log('⚡ Extração otimizada: parou cedo após encontrar match exato!');
-        } else {
-          console.log('✅ Melhor match encontrado durante extração');
-        }
-      }
-      
-      // Fallback: Se não encontrou durante extração, buscar nos dados salvos
-      if (!bestPlan) {
-        console.log('⚠️  Plano não encontrado durante extração, verificando dados salvos...');
-        const dataDir = path.join(process.cwd(), 'data');
-        
-        if (fs.existsSync(dataDir)) {
-          const files = fs.readdirSync(dataDir)
-            .filter(f => f.startsWith('table-data-imoveis-all-pages-') && f.endsWith('.json'))
-            .sort()
-            .reverse();
-
-          if (files.length > 0) {
-            const latestFile = path.join(dataDir, files[0]);
-            try {
-              const fileContent = fs.readFileSync(latestFile, 'utf-8');
-              const scrapedData = JSON.parse(fileContent);
-              
-              // Buscar o plano mais similar nos dados salvos
-              const match = this.findBestMatchingPlan(scrapedData, data.valor, data.prazo);
-              if (match && match.rawData) {
-                bestPlan = match.rawData; // Usar o objeto row completo diretamente
-                console.log('✅ Plano encontrado nos dados salvos');
-              }
-            } catch (e) {
-              console.warn('⚠️  Erro ao ler arquivo salvo:', e.message);
-            }
-          }
+      // Usar os dados extraídos para encontrar a melhor cotação
+      let bestPlan = null;
+      if (fullExtractionResult && fullExtractionResult.rows && fullExtractionResult.rows.length > 0) {
+        console.log(`🔍 Buscando melhor cotação em ${fullExtractionResult.rows.length} cotações disponíveis...`);
+        const match = this.findBestMatchingPlan(fullExtractionResult, data.valor, data.prazo);
+        if (match) {
+          bestPlan = match;
+          console.log('✅ Melhor cotação encontrada nos dados extraídos');
         }
       }
 
       if (!bestPlan) {
-        throw new Error('Não foi possível encontrar nenhum plano disponível nos dados. Por favor, tente novamente mais tarde.');
+        throw new Error('Não foi possível encontrar nenhuma cotação disponível nos dados. Por favor, tente novamente mais tarde.');
       }
 
       // Verificar se é match exato
@@ -2434,7 +2405,7 @@ class CanopusRPAService {
         (Math.abs(planValue - data.valor) < 0.01) && 
         (planTerm === data.prazo);
 
-      console.log('✅ Plano encontrado:');
+      console.log('✅ Cotação encontrada:');
       console.log(`   NOME DO BEM: ${bestPlan['NOME DO BEM'] || 'N/A'}`);
       console.log(`   VALOR: ${bestPlan['VALOR'] || 'N/A'}`);
       console.log(`   PRAZO: ${bestPlan['PRAZO'] || 'N/A'}`);
