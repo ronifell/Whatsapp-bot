@@ -519,6 +519,103 @@ Por favor, aguarde um momento enquanto preparo sua cotação... ⏱️✨`;
   }
 
   /**
+   * Formata cotações em formato de tabela para WhatsApp
+   */
+  formatQuotesTable(quotes) {
+    if (!quotes || quotes.length === 0) {
+      return '';
+    }
+
+    // Cabeçalho da tabela
+    let table = '┌─────────────────────────────────────────────────────────────────────────────┐\n';
+    table += '│ NOME DO BEM                    │ VALOR      │ PRAZO │ 1ª PARCELA │ PLANO │ TIPO │\n';
+    table += '├─────────────────────────────────────────────────────────────────────────────┤\n';
+
+    // Linhas de dados
+    quotes.forEach((quote, index) => {
+      const nomeBem = (quote['NOME DO BEM'] || 'N/A').substring(0, 30).padEnd(30);
+      const valor = (quote['VALOR'] || 'N/A').substring(0, 10).padEnd(10);
+      const prazo = (quote['PRAZO'] || 'N/A').substring(0, 5).padEnd(5);
+      const primeiraParcela = (quote['1ª PARCELA'] || 'N/A').substring(0, 10).padEnd(10);
+      const plano = (quote['PLANO'] || 'N/A').substring(0, 5).padEnd(5);
+      const tipoVenda = (quote['TIPO DE VENDA'] || 'N/A').substring(0, 5).padEnd(5);
+      
+      table += `│ ${nomeBem} │ ${valor} │ ${prazo} │ ${primeiraParcela} │ ${plano} │ ${tipoVenda} │\n`;
+      
+      if (index < quotes.length - 1) {
+        table += '├─────────────────────────────────────────────────────────────────────────────┤\n';
+      }
+    });
+
+    table += '└─────────────────────────────────────────────────────────────────────────────┘\n';
+    
+    return table;
+  }
+
+  /**
+   * Converte número para ícone de número emoji
+   * @param {number} num - Número a ser convertido (1-10)
+   * @returns {string} - Ícone emoji do número
+   */
+  getNumberIcon(num) {
+    const numberIcons = {
+      1: '1️⃣',
+      2: '2️⃣',
+      3: '3️⃣',
+      4: '4️⃣',
+      5: '5️⃣',
+      6: '6️⃣',
+      7: '7️⃣',
+      8: '8️⃣',
+      9: '9️⃣',
+      10: '🔟'
+    };
+    return numberIcons[num] || num.toString();
+  }
+
+  /**
+   * Formata cotações em formato de tabela simples (mais compatível com WhatsApp)
+   * @param {Array} quotes - Array de cotações
+   * @param {string} type - Tipo de consórcio ('Consórcio de Automóvel', 'Consórcio de Imóvel', etc.)
+   */
+  formatQuotesTableSimple(quotes, type = 'Consórcio de Automóvel') {
+    if (!quotes || quotes.length === 0) {
+      return '';
+    }
+
+    // Determinar ícone baseado no tipo
+    let icon = '🚗'; // Padrão para automóvel
+    if (type && type.includes('Imóvel')) {
+      icon = '🏠';
+    } else if (type && type.includes('Automóvel')) {
+      icon = '🚗';
+    } else if (type && type.includes('Serviço')) {
+      icon = '🔧';
+    }
+
+    let table = '';
+    
+    quotes.forEach((quote, index) => {
+      const quoteNumber = index + 1;
+      const numberIcon = this.getNumberIcon(quoteNumber);
+      
+      table += `${icon}${numberIcon} *NOME DO BEM:*\n`;
+      table += `${quote['NOME DO BEM'] || 'N/A'}\n\n`;
+      table += `*VALOR:* ${quote['VALOR'] || 'N/A'}\n`;
+      table += `*PRAZO:* ${quote['PRAZO'] || 'N/A'} meses\n`;
+      table += `*1ª PARCELA:* ${quote['1ª PARCELA'] || 'N/A'}\n`;
+      table += `*PLANO:* ${quote['PLANO'] || 'N/A'}\n`;
+      table += `*TIPO DE VENDA:* ${quote['TIPO DE VENDA'] || 'N/A'}\n`;
+      
+      if (index < quotes.length - 1) {
+        table += '\n';
+      }
+    });
+    
+    return table;
+  }
+
+  /**
    * Envia cotação ao cliente
    */
   async sendQuotation(phone, quotationData) {
@@ -527,81 +624,42 @@ Por favor, aguarde um momento enquanto preparo sua cotação... ⏱️✨`;
     // Verificar se é match exato ou similar
     const isExactMatch = quotationData.isExactMatch !== false; // Default true se não especificado
     
-    // Formatar mensagem com todos os campos exatamente como aparecem nos dados
-    // rawData é o objeto row completo do JSON
-    const row = quotationData.rawData || {};
+    // rawData pode ser um array ou um objeto único
+    const rawData = quotationData.rawData || {};
+    const quotes = Array.isArray(rawData) ? rawData : [rawData];
     const requestedValue = quotationData.requestedValue || 0;
     const requestedTerm = quotationData.requestedTerm || 0;
     
-    // Extrair valores numéricos
-    const planValue = parseFloat((row['VALOR'] || '').replace(/[^\d,]/g, '').replace(',', '.'));
-    const planTerm = parseInt((row['PRAZO'] || '').replace(/\D/g, ''));
-    const primeiraParcela = parseFloat((row['1ª PARCELA'] || '').replace(/[^\d,]/g, '').replace(',', '.'));
+    // Mensagem inicial
+    let message = `✅ *Vou apresentar algumas cotações que mais se aproximam do que você está procurando:*\n\n`;
     
-    // Calcular taxa
-    const taxa = this.calculateTaxRate(primeiraParcela, planValue, planTerm);
-    const taxaText = taxa ? `${taxa}%` : 'N/A';
+    // Formatar tabela de cotações (passar o tipo para determinar o ícone)
+    const consortiumType = quotationData.type || 'Consórcio de Automóvel';
+    const table = this.formatQuotesTableSimple(quotes, consortiumType);
+    message += table;
     
-    // Formatar valor para mensagem
-    const valorFormatado = row['VALOR'] || 'N/A';
-    const valorEmMil = planValue ? this.formatValueInMil(planValue) : 'N/A';
-    
-    let message = '';
-    
-    if (isExactMatch) {
-      // Match exato - mensagem simples
-      message = `✅ *Cotação Gerada com Sucesso!*
-
-📋 *Detalhes da Cotação:*
-
-*Valor da carta:* ${valorFormatado}
-*Prazo:* ${planTerm || row['PRAZO'] || 'N/A'} meses
-*Parcela:* ${row['1ª PARCELA'] || 'N/A'}
-*Taxa:* ${taxaText}
-
----
-
-*Gostou da cotação?*
-
-Para *prosseguir com o fechamento*, digite: *FECHAR*
-
-Precisa de ajuda? Digite: *AJUDA*`;
-    } else {
-      // Não é match exato - usar formato solicitado
-      message = `A proposta mais próxima disponível é de ${valorEmMil}.
-
-Segue a simulação para você ter uma referência:
-
-*Valor da carta:* ${valorFormatado}
-*Prazo:* ${planTerm || row['PRAZO'] || 'N/A'} meses
-*Parcela:* ${row['1ª PARCELA'] || 'N/A'}
-*Taxa:* ${taxaText}
-
-Peço desculpas pela diferença.
-
-Você prefere:
-1️⃣ Ajustar o valor da carta
-2️⃣ Falar com um consultor`;
-    }
+    // Adicionar opções
+    message += `\n*O que deseja fazer?*\n\n`;
+    message += `1️⃣ Ajustar o valor da carta\n\n`;
+    message += `2️⃣ Falar com um consultor`;
 
     // Log especial para cotações
     if (!this.isFrontendUser(phone) && !this.isTestMode()) {
       console.log('\n' + '═'.repeat(70));
       console.log(`💰 COTAÇÃO ENVIADA [${timestamp}]`);
       console.log('─'.repeat(70));
-      const row = quotationData.rawData || {};
       console.log(`👤 Para: ${phone}`);
-      console.log(`📊 NOME DO BEM: ${row['NOME DO BEM'] || 'N/A'}`);
-      console.log(`💵 VALOR: ${row['VALOR'] || 'N/A'}`);
-      console.log(`📅 PRAZO: ${row['PRAZO'] || 'N/A'} meses`);
-      console.log(`💳 1ª PARCELA: ${row['1ª PARCELA'] || 'N/A'}`);
-      console.log(`📋 PLANO: ${row['PLANO'] || 'N/A'}`);
-      console.log(`🏷️  TIPO DE VENDA: ${row['TIPO DE VENDA'] || 'N/A'}`);
+      console.log(`📊 Total de cotações: ${quotes.length}`);
+      quotes.forEach((quote, index) => {
+        console.log(`\n   Cotação ${index + 1}:`);
+        console.log(`   📊 NOME DO BEM: ${quote['NOME DO BEM'] || 'N/A'}`);
+        console.log(`   💵 VALOR: ${quote['VALOR'] || 'N/A'}`);
+        console.log(`   📅 PRAZO: ${quote['PRAZO'] || 'N/A'} meses`);
+        console.log(`   💳 1ª PARCELA: ${quote['1ª PARCELA'] || 'N/A'}`);
+        console.log(`   📋 PLANO: ${quote['PLANO'] || 'N/A'}`);
+        console.log(`   🏷️  TIPO DE VENDA: ${quote['TIPO DE VENDA'] || 'N/A'}`);
+      });
       console.log(`✅ Match Exato: ${isExactMatch ? 'SIM' : 'NÃO'}`);
-      if (!isExactMatch) {
-        console.log(`📈 Plano Maior Disponível: ${hasHigherValue ? 'SIM' : 'NÃO'}`);
-        console.log(`📉 Plano Menor Disponível: ${hasLowerValue ? 'SIM' : 'NÃO'}`);
-      }
       console.log('═'.repeat(70) + '\n');
     }
 

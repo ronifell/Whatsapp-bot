@@ -2198,7 +2198,7 @@ class CanopusRPAService {
 
       console.log(`📊 Analisando ${scrapedData.rows.length} cotações disponíveis`);
 
-      // STEP 1: Calcular diferenças de VALOR para todas as cotações
+      // STEP 1: Calcular diferenças de VALOR e PRAZO para todas as cotações
       const quotesWithDifferences = [];
       
       for (const row of scrapedData.rows) {
@@ -2227,7 +2227,8 @@ class CanopusRPAService {
             planValue: planValue,
             planTerm: planTerm,
             valueDifference: valueDifference,
-            termDifference: termDifference
+            termDifference: termDifference,
+            totalDifference: valueDifference + termDifference * 1000 // Weight term difference less
           });
         } catch (e) {
           // Continuar se houver erro ao processar uma linha
@@ -2248,22 +2249,50 @@ class CanopusRPAService {
       const quotesWithBestValue = quotesWithDifferences.filter(q => q.valueDifference === smallestValueDifference);
       console.log(`📋 ${quotesWithBestValue.length} cotação(ões) com VALOR mais similar`);
 
-      // STEP 4: Se houver apenas uma cotação com melhor VALOR, retornar ela
-      // Se houver múltiplas cotações com o mesmo VALOR, encontrar a com PRAZO mais similar
-      let selectedQuote;
-      if (quotesWithBestValue.length === 1) {
-        selectedQuote = quotesWithBestValue[0].quote;
-        console.log(`✅ Única cotação com melhor VALOR selecionada`);
-      } else {
-        // Entre cotações com mesmo VALOR, encontrar a com menor diferença de PRAZO
-        const smallestTermDifference = Math.min(...quotesWithBestValue.map(q => q.termDifference));
-        const quoteWithBestTerm = quotesWithBestValue.find(q => q.termDifference === smallestTermDifference);
-        selectedQuote = quoteWithBestTerm.quote;
-        console.log(`✅ Entre ${quotesWithBestValue.length} cotações com mesmo VALOR, selecionada a com PRAZO mais similar (diferença: ${smallestTermDifference} meses)`);
+      // STEP 4: Entre as cotações com melhor VALOR, encontrar as com melhor PRAZO
+      const smallestTermDifference = Math.min(...quotesWithBestValue.map(q => q.termDifference));
+      const quotesWithBestValueAndTerm = quotesWithBestValue.filter(q => q.termDifference === smallestTermDifference);
+      
+      console.log(`📋 ${quotesWithBestValueAndTerm.length} cotação(ões) com VALOR e PRAZO mais similares`);
+
+      // STEP 5: Se há múltiplas cotações com mesmo valor e prazo, retornar todas
+      if (quotesWithBestValueAndTerm.length > 1) {
+        const selectedQuotes = quotesWithBestValueAndTerm.map(q => q.quote);
+        console.log(`✅ ${selectedQuotes.length} cotações com mesmo VALOR e PRAZO encontradas - retornando todas`);
+        return selectedQuotes;
       }
 
-      console.log(`🎯 Cotação selecionada: VALOR ${selectedQuote['VALOR'] || 'N/A'}, PRAZO ${selectedQuote['PRAZO'] || 'N/A'}`);
-      return selectedQuote;
+      // STEP 6: Se há apenas uma cotação com melhor valor e prazo, buscar 2-3 similares adicionais
+      const bestQuote = quotesWithBestValueAndTerm[0].quote;
+      const bestPlanValue = quotesWithBestValueAndTerm[0].planValue;
+      const bestPlanTerm = quotesWithBestValueAndTerm[0].planTerm;
+
+      // Buscar cotações similares (mesmo valor ou mesmo prazo ou valor muito próximo)
+      const similarQuotes = quotesWithDifferences
+        .filter(q => {
+          // Excluir a melhor cotação já encontrada
+          if (q.planValue === bestPlanValue && q.planTerm === bestPlanTerm) return false;
+          
+          // Incluir se: mesmo valor (independente do prazo) OU mesmo prazo (independente do valor) OU valor muito próximo
+          return (q.valueDifference === 0) || 
+                 (q.termDifference === 0) || 
+                 (q.valueDifference <= bestPlanValue * 0.1); // Até 10% de diferença no valor
+        })
+        .sort((a, b) => {
+          // Ordenar por: primeiro valor igual, depois prazo igual, depois menor diferença total
+          if (a.valueDifference === 0 && b.valueDifference !== 0) return -1;
+          if (a.valueDifference !== 0 && b.valueDifference === 0) return 1;
+          if (a.termDifference === 0 && b.termDifference !== 0) return -1;
+          if (a.termDifference !== 0 && b.termDifference === 0) return 1;
+          return a.totalDifference - b.totalDifference;
+        })
+        .slice(0, 3) // Pegar até 3 cotações similares
+        .map(q => q.quote);
+
+      const allQuotes = [bestQuote, ...similarQuotes];
+      console.log(`✅ 1 cotação principal + ${similarQuotes.length} similares encontradas - retornando ${allQuotes.length} cotações`);
+      
+      return allQuotes;
     } catch (error) {
       console.error('❌ Erro ao encontrar melhor cotação:', error.message);
       return null;
@@ -2299,40 +2328,44 @@ class CanopusRPAService {
         throw error;
       }
       
-      // Usar os dados extraídos para encontrar a melhor cotação
-      let bestPlan = null;
+      // Usar os dados extraídos para encontrar as melhores cotações
+      let matchingPlans = null;
       if (fullExtractionResult && fullExtractionResult.rows && fullExtractionResult.rows.length > 0) {
-        console.log(`🔍 Buscando melhor cotação em ${fullExtractionResult.rows.length} cotações disponíveis...`);
-        const match = this.findBestMatchingPlan(fullExtractionResult, data.valor, data.prazo);
-        if (match) {
-          bestPlan = match;
-          console.log('✅ Melhor cotação encontrada nos dados extraídos');
+        console.log(`🔍 Buscando melhores cotações em ${fullExtractionResult.rows.length} cotações disponíveis...`);
+        const matches = this.findBestMatchingPlan(fullExtractionResult, data.valor, data.prazo);
+        if (matches) {
+          matchingPlans = Array.isArray(matches) ? matches : [matches];
+          console.log(`✅ ${matchingPlans.length} cotação(ões) encontrada(s) nos dados extraídos`);
         }
       }
 
-      if (!bestPlan) {
+      if (!matchingPlans || matchingPlans.length === 0) {
         throw new Error('Não foi possível encontrar nenhuma cotação disponível nos dados. Por favor, tente novamente mais tarde.');
       }
 
-      // Verificar se é match exato
-      const planValue = parseFloat((bestPlan['VALOR'] || '').replace(/[^\d,]/g, '').replace(',', '.'));
-      const planTerm = parseInt((bestPlan['PRAZO'] || '').replace(/\D/g, ''));
+      // Verificar se é match exato (primeira cotação)
+      const firstPlan = matchingPlans[0];
+      const planValue = parseFloat((firstPlan['VALOR'] || '').replace(/[^\d,]/g, '').replace(',', '.'));
+      const planTerm = parseInt((firstPlan['PRAZO'] || '').replace(/\D/g, ''));
       const isExactMatch = planValue && planTerm && 
         (Math.abs(planValue - data.valor) < 0.01) && 
         (planTerm === data.prazo);
 
-      console.log('✅ Cotação encontrada:');
-      console.log(`   NOME DO BEM: ${bestPlan['NOME DO BEM'] || 'N/A'}`);
-      console.log(`   VALOR: ${bestPlan['VALOR'] || 'N/A'}`);
-      console.log(`   PRAZO: ${bestPlan['PRAZO'] || 'N/A'}`);
-      console.log(`   1ª PARCELA: ${bestPlan['1ª PARCELA'] || 'N/A'}`);
-      console.log(`   PLANO: ${bestPlan['PLANO'] || 'N/A'}`);
-      console.log(`   TIPO DE VENDA: ${bestPlan['TIPO DE VENDA'] || 'N/A'}`);
+      console.log(`✅ ${matchingPlans.length} cotação(ões) encontrada(s):`);
+      matchingPlans.forEach((plan, index) => {
+        console.log(`   Cotação ${index + 1}:`);
+        console.log(`     NOME DO BEM: ${plan['NOME DO BEM'] || 'N/A'}`);
+        console.log(`     VALOR: ${plan['VALOR'] || 'N/A'}`);
+        console.log(`     PRAZO: ${plan['PRAZO'] || 'N/A'}`);
+        console.log(`     1ª PARCELA: ${plan['1ª PARCELA'] || 'N/A'}`);
+        console.log(`     PLANO: ${plan['PLANO'] || 'N/A'}`);
+        console.log(`     TIPO DE VENDA: ${plan['TIPO DE VENDA'] || 'N/A'}`);
+      });
 
-      // Preparar dados da cotação usando o objeto row completo
+      // Preparar dados da cotação usando array de objetos row completos
       const quotationData = {
         type: 'Consórcio de Automóvel',
-        rawData: bestPlan, // O objeto row completo do JSON
+        rawData: matchingPlans, // Array de objetos row completos do JSON
         isExactMatch: isExactMatch,
         requestedValue: data.valor,
         requestedTerm: data.prazo,
@@ -2383,40 +2416,44 @@ class CanopusRPAService {
         throw error;
       }
       
-      // Usar os dados extraídos para encontrar a melhor cotação
-      let bestPlan = null;
+      // Usar os dados extraídos para encontrar as melhores cotações
+      let matchingPlans = null;
       if (fullExtractionResult && fullExtractionResult.rows && fullExtractionResult.rows.length > 0) {
-        console.log(`🔍 Buscando melhor cotação em ${fullExtractionResult.rows.length} cotações disponíveis...`);
-        const match = this.findBestMatchingPlan(fullExtractionResult, data.valor, data.prazo);
-        if (match) {
-          bestPlan = match;
-          console.log('✅ Melhor cotação encontrada nos dados extraídos');
+        console.log(`🔍 Buscando melhores cotações em ${fullExtractionResult.rows.length} cotações disponíveis...`);
+        const matches = this.findBestMatchingPlan(fullExtractionResult, data.valor, data.prazo);
+        if (matches) {
+          matchingPlans = Array.isArray(matches) ? matches : [matches];
+          console.log(`✅ ${matchingPlans.length} cotação(ões) encontrada(s) nos dados extraídos`);
         }
       }
 
-      if (!bestPlan) {
+      if (!matchingPlans || matchingPlans.length === 0) {
         throw new Error('Não foi possível encontrar nenhuma cotação disponível nos dados. Por favor, tente novamente mais tarde.');
       }
 
-      // Verificar se é match exato
-      const planValue = parseFloat((bestPlan['VALOR'] || '').replace(/[^\d,]/g, '').replace(',', '.'));
-      const planTerm = parseInt((bestPlan['PRAZO'] || '').replace(/\D/g, ''));
+      // Verificar se é match exato (primeira cotação)
+      const firstPlan = matchingPlans[0];
+      const planValue = parseFloat((firstPlan['VALOR'] || '').replace(/[^\d,]/g, '').replace(',', '.'));
+      const planTerm = parseInt((firstPlan['PRAZO'] || '').replace(/\D/g, ''));
       const isExactMatch = planValue && planTerm && 
         (Math.abs(planValue - data.valor) < 0.01) && 
         (planTerm === data.prazo);
 
-      console.log('✅ Cotação encontrada:');
-      console.log(`   NOME DO BEM: ${bestPlan['NOME DO BEM'] || 'N/A'}`);
-      console.log(`   VALOR: ${bestPlan['VALOR'] || 'N/A'}`);
-      console.log(`   PRAZO: ${bestPlan['PRAZO'] || 'N/A'}`);
-      console.log(`   1ª PARCELA: ${bestPlan['1ª PARCELA'] || 'N/A'}`);
-      console.log(`   PLANO: ${bestPlan['PLANO'] || 'N/A'}`);
-      console.log(`   TIPO DE VENDA: ${bestPlan['TIPO DE VENDA'] || 'N/A'}`);
+      console.log(`✅ ${matchingPlans.length} cotação(ões) encontrada(s):`);
+      matchingPlans.forEach((plan, index) => {
+        console.log(`   Cotação ${index + 1}:`);
+        console.log(`     NOME DO BEM: ${plan['NOME DO BEM'] || 'N/A'}`);
+        console.log(`     VALOR: ${plan['VALOR'] || 'N/A'}`);
+        console.log(`     PRAZO: ${plan['PRAZO'] || 'N/A'}`);
+        console.log(`     1ª PARCELA: ${plan['1ª PARCELA'] || 'N/A'}`);
+        console.log(`     PLANO: ${plan['PLANO'] || 'N/A'}`);
+        console.log(`     TIPO DE VENDA: ${plan['TIPO DE VENDA'] || 'N/A'}`);
+      });
 
-      // Preparar dados da cotação usando o objeto row completo
+      // Preparar dados da cotação usando array de objetos row completos
       const quotationData = {
         type: 'Consórcio de Imóvel',
-        rawData: bestPlan, // O objeto row completo do JSON
+        rawData: matchingPlans, // Array de objetos row completos do JSON
         isExactMatch: isExactMatch,
         requestedValue: data.valor,
         requestedTerm: data.prazo,

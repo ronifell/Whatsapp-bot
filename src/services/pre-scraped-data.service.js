@@ -8,8 +8,8 @@ import path from 'path';
 class PreScrapedDataService {
   
   /**
-   * Encontra o melhor plano baseado nos dados do cliente
-   * Sempre retorna o plano mais próximo disponível, mesmo que não seja exato
+   * Encontra os melhores planos baseado nos dados do cliente
+   * Retorna múltiplos planos se houver matches exatos, ou 1 principal + 2-3 similares
    */
   findBestMatchingPlan(scrapedData, customerValue, customerTerm) {
     try {
@@ -22,7 +22,7 @@ class PreScrapedDataService {
         customerValue.toString().replace(/[^\d,]/g, '').replace(',', '.')
       );
 
-      // STEP 1: Find all plans and calculate budget differences (ignoring period)
+      // STEP 1: Find all plans and calculate budget differences
       const validPlans = [];
 
       for (const row of scrapedData.rows) {
@@ -47,7 +47,7 @@ class PreScrapedDataService {
             firstPaymentText.toString().replace(/[^\d,]/g, '').replace(',', '.')
           );
 
-          // Calcular diferença de valor (budget) - IGNORANDO o período
+          // Calcular diferença de valor (budget)
           const valueDifference = Math.abs(planValue - cleanCustomerValue);
           const termDifference = Math.abs(planTerm - customerTerm);
 
@@ -61,6 +61,7 @@ class PreScrapedDataService {
             rawData: row,
             valueDifference: valueDifference,
             termDifference: termDifference,
+            totalDifference: valueDifference + termDifference * 1000, // Weight term difference less
             isExactMatch: valueDifference === 0 && termDifference === 0
           });
         } catch (e) {
@@ -79,32 +80,48 @@ class PreScrapedDataService {
       // STEP 3: Filter plans with the smallest budget difference
       const plansWithBestBudget = validPlans.filter(p => p.valueDifference === smallestBudgetDifference);
 
-      // STEP 4: If multiple plans have the same budget difference, find the one with most similar period
-      let bestMatch;
-      if (plansWithBestBudget.length === 1) {
-        bestMatch = plansWithBestBudget[0];
-      } else {
-        // Among plans with same budget, find the one with smallest period difference
-        const smallestPeriodDifference = Math.min(...plansWithBestBudget.map(p => p.termDifference));
-        bestMatch = plansWithBestBudget.find(p => p.termDifference === smallestPeriodDifference);
+      // STEP 4: Among plans with best budget, find those with best term
+      const smallestTermDifference = Math.min(...plansWithBestBudget.map(p => p.termDifference));
+      const plansWithBestBudgetAndTerm = plansWithBestBudget.filter(p => p.termDifference === smallestTermDifference);
+
+      // STEP 5: If multiple plans with same value and term, return all
+      if (plansWithBestBudgetAndTerm.length > 1) {
+        const matchingPlans = plansWithBestBudgetAndTerm.map(p => p.rawData);
+        console.log(`✅ ${matchingPlans.length} planos com mesmo VALOR e PRAZO encontrados - retornando todos`);
+        return matchingPlans;
       }
 
-      // Adicionar informações sobre a qualidade do match
-      if (bestMatch) {
-        bestMatch.matchQuality = {
-          valueDifference: bestMatch.valueDifference,
-          termDifference: bestMatch.termDifference,
-          isExactMatch: bestMatch.isExactMatch,
-          requestedValue: cleanCustomerValue,
-          requestedTerm: customerTerm
-        };
-        // Remove helper properties before returning
-        delete bestMatch.valueDifference;
-        delete bestMatch.termDifference;
-        delete bestMatch.isExactMatch;
-      }
+      // STEP 6: If only one plan with best value and term, find 2-3 similar ones
+      const bestPlan = plansWithBestBudgetAndTerm[0];
+      const bestPlanValue = bestPlan.valor;
+      const bestPlanTerm = bestPlan.prazo;
 
-      return bestMatch;
+      // Buscar planos similares (mesmo valor ou mesmo prazo ou valor muito próximo)
+      const similarPlans = validPlans
+        .filter(p => {
+          // Excluir o melhor plano já encontrado
+          if (p.valor === bestPlanValue && p.prazo === bestPlanTerm) return false;
+          
+          // Incluir se: mesmo valor (independente do prazo) OU mesmo prazo (independente do valor) OU valor muito próximo
+          return (p.valueDifference === 0) || 
+                 (p.termDifference === 0) || 
+                 (p.valueDifference <= bestPlanValue * 0.1); // Até 10% de diferença no valor
+        })
+        .sort((a, b) => {
+          // Ordenar por: primeiro valor igual, depois prazo igual, depois menor diferença total
+          if (a.valueDifference === 0 && b.valueDifference !== 0) return -1;
+          if (a.valueDifference !== 0 && b.valueDifference === 0) return 1;
+          if (a.termDifference === 0 && b.termDifference !== 0) return -1;
+          if (a.termDifference !== 0 && b.termDifference === 0) return 1;
+          return a.totalDifference - b.totalDifference;
+        })
+        .slice(0, 3) // Pegar até 3 planos similares
+        .map(p => p.rawData);
+
+      const allPlans = [bestPlan.rawData, ...similarPlans];
+      console.log(`✅ 1 plano principal + ${similarPlans.length} similares encontrados - retornando ${allPlans.length} planos`);
+      
+      return allPlans;
     } catch (error) {
       console.error('❌ Erro ao encontrar melhor plano:', error.message);
       return null;
@@ -205,77 +222,51 @@ class PreScrapedDataService {
         throw new Error('Dados de automóveis não encontrados. Execute o scraping primeiro ou verifique a pasta data/.');
       }
 
-      // Sempre buscar o plano mais próximo disponível
-      let bestPlan = this.findBestMatchingPlan(scrapedData, data.valor, data.prazo);
+      // Buscar os melhores planos disponíveis
+      let matchingPlans = this.findBestMatchingPlan(scrapedData, data.valor, data.prazo);
       
-      if (!bestPlan) {
+      if (!matchingPlans || (Array.isArray(matchingPlans) && matchingPlans.length === 0)) {
         throw new Error('Não foi possível encontrar nenhum plano disponível nos dados.');
       }
 
-      console.log('✅ Plano encontrado:');
-      console.log(`   Nome: ${bestPlan.nomeBem}`);
-      console.log(`   Valor: R$ ${bestPlan.valor.toLocaleString('pt-BR')}`);
-      console.log(`   Prazo: ${bestPlan.prazo} meses`);
-      console.log(`   1ª Parcela: R$ ${bestPlan.primeiraParcela.toLocaleString('pt-BR')}`);
-
-      // Verificar se é match exato
-      const isExactMatch = bestPlan.matchQuality?.isExactMatch || false;
-      const valueDiff = bestPlan.matchQuality?.valueDifference || 0;
-      const termDiff = bestPlan.matchQuality?.termDifference || 0;
-      const requestedValue = bestPlan.matchQuality?.requestedValue || data.valor;
-      const requestedTerm = bestPlan.matchQuality?.requestedTerm || data.prazo;
-
-      // Calcular parcela mensal estimada (se não disponível)
-      const monthlyPayment = bestPlan.primeiraParcela || 
-        this.calculateEstimatedPayment(bestPlan.valor, bestPlan.prazo);
-
-      // Preparar mensagem de explicação se não for match exato
-      let explanationMessage = '';
-      if (!isExactMatch) {
-        explanationMessage = '\n\n📌 *Observação:*\n';
-        explanationMessage += 'Não encontramos um plano exatamente igual ao solicitado, mas selecionamos o plano mais próximo disponível:\n\n';
-        
-        if (valueDiff > 0) {
-          const diffPercent = ((bestPlan.valor - requestedValue) / requestedValue * 100).toFixed(1);
-          if (bestPlan.valor > requestedValue) {
-            explanationMessage += `• Valor: R$ ${bestPlan.valor.toLocaleString('pt-BR')} (${diffPercent}% acima do solicitado de R$ ${requestedValue.toLocaleString('pt-BR')})\n`;
-          } else {
-            explanationMessage += `• Valor: R$ ${bestPlan.valor.toLocaleString('pt-BR')} (${Math.abs(diffPercent)}% abaixo do solicitado de R$ ${requestedValue.toLocaleString('pt-BR')})\n`;
-          }
-        }
-        
-        if (termDiff > 0) {
-          if (bestPlan.prazo > requestedTerm) {
-            explanationMessage += `• Prazo: ${bestPlan.prazo} meses (${termDiff} meses a mais que os ${requestedTerm} meses solicitados)\n`;
-          } else {
-            explanationMessage += `• Prazo: ${bestPlan.prazo} meses (${termDiff} meses a menos que os ${requestedTerm} meses solicitados)\n`;
-          }
-        }
-        
-        explanationMessage += '\nEste é o plano mais próximo disponível em nosso sistema.';
+      // Garantir que seja um array
+      if (!Array.isArray(matchingPlans)) {
+        matchingPlans = [matchingPlans];
       }
 
-      // Preparar dados da cotação
+      // Verificar se é match exato (primeira cotação)
+      const firstPlan = matchingPlans[0];
+      const planValue = parseFloat((firstPlan['VALOR'] || '').replace(/[^\d,]/g, '').replace(',', '.'));
+      const planTerm = parseInt((firstPlan['PRAZO'] || '').replace(/\D/g, ''));
+      const isExactMatch = planValue && planTerm && 
+        (Math.abs(planValue - data.valor) < 0.01) && 
+        (planTerm === data.prazo);
+
+      console.log(`✅ ${matchingPlans.length} plano(s) encontrado(s):`);
+      matchingPlans.forEach((plan, index) => {
+        console.log(`   Plano ${index + 1}:`);
+        console.log(`     NOME DO BEM: ${plan['NOME DO BEM'] || 'N/A'}`);
+        console.log(`     VALOR: ${plan['VALOR'] || 'N/A'}`);
+        console.log(`     PRAZO: ${plan['PRAZO'] || 'N/A'}`);
+        console.log(`     1ª PARCELA: ${plan['1ª PARCELA'] || 'N/A'}`);
+        console.log(`     PLANO: ${plan['PLANO'] || 'N/A'}`);
+        console.log(`     TIPO DE VENDA: ${plan['TIPO DE VENDA'] || 'N/A'}`);
+      });
+
+      // Preparar dados da cotação usando array de objetos row completos
       const quotationData = {
         type: 'Consórcio de Automóvel',
-        value: bestPlan.valor,
-        months: bestPlan.prazo,
-        monthlyPayment: monthlyPayment,
-        adminFee: 15, // Taxa padrão
-        details: `Plano: ${bestPlan.plano}\nTipo de Venda: ${bestPlan.tipoVenda}\nNome do Bem: ${bestPlan.nomeBem}${explanationMessage}`,
+        rawData: matchingPlans, // Array de objetos row completos do JSON
+        isExactMatch: isExactMatch,
+        requestedValue: data.valor,
+        requestedTerm: data.prazo,
         timestamp: new Date().toISOString(),
         source: 'pre-scraped',
-        isExactMatch: isExactMatch,
         customerData: {
           nome: data.nome,
           cpf: data.cpf,
           email: data.email,
           dataNascimento: data.dataNascimento
-        },
-        planDetails: {
-          nomeBem: bestPlan.nomeBem,
-          plano: bestPlan.plano,
-          tipoVenda: bestPlan.tipoVenda
         }
       };
       
@@ -305,77 +296,51 @@ class PreScrapedDataService {
         throw new Error('Dados de imóveis não encontrados. Execute o scraping primeiro ou verifique a pasta data/.');
       }
 
-      // Sempre buscar o plano mais próximo disponível
-      let bestPlan = this.findBestMatchingPlan(scrapedData, data.valor, data.prazo);
+      // Buscar os melhores planos disponíveis
+      let matchingPlans = this.findBestMatchingPlan(scrapedData, data.valor, data.prazo);
       
-      if (!bestPlan) {
+      if (!matchingPlans || (Array.isArray(matchingPlans) && matchingPlans.length === 0)) {
         throw new Error('Não foi possível encontrar nenhum plano disponível nos dados.');
       }
 
-      console.log('✅ Plano encontrado:');
-      console.log(`   Nome: ${bestPlan.nomeBem}`);
-      console.log(`   Valor: R$ ${bestPlan.valor.toLocaleString('pt-BR')}`);
-      console.log(`   Prazo: ${bestPlan.prazo} meses`);
-      console.log(`   1ª Parcela: R$ ${bestPlan.primeiraParcela.toLocaleString('pt-BR')}`);
-
-      // Verificar se é match exato
-      const isExactMatch = bestPlan.matchQuality?.isExactMatch || false;
-      const valueDiff = bestPlan.matchQuality?.valueDifference || 0;
-      const termDiff = bestPlan.matchQuality?.termDifference || 0;
-      const requestedValue = bestPlan.matchQuality?.requestedValue || data.valor;
-      const requestedTerm = bestPlan.matchQuality?.requestedTerm || data.prazo;
-
-      // Calcular parcela mensal estimada (se não disponível)
-      const monthlyPayment = bestPlan.primeiraParcela || 
-        this.calculateEstimatedPayment(bestPlan.valor, bestPlan.prazo);
-
-      // Preparar mensagem de explicação se não for match exato
-      let explanationMessage = '';
-      if (!isExactMatch) {
-        explanationMessage = '\n\n📌 *Observação:*\n';
-        explanationMessage += 'Não encontramos um plano exatamente igual ao solicitado, mas selecionamos o plano mais próximo disponível:\n\n';
-        
-        if (valueDiff > 0) {
-          const diffPercent = ((bestPlan.valor - requestedValue) / requestedValue * 100).toFixed(1);
-          if (bestPlan.valor > requestedValue) {
-            explanationMessage += `• Valor: R$ ${bestPlan.valor.toLocaleString('pt-BR')} (${diffPercent}% acima do solicitado de R$ ${requestedValue.toLocaleString('pt-BR')})\n`;
-          } else {
-            explanationMessage += `• Valor: R$ ${bestPlan.valor.toLocaleString('pt-BR')} (${Math.abs(diffPercent)}% abaixo do solicitado de R$ ${requestedValue.toLocaleString('pt-BR')})\n`;
-          }
-        }
-        
-        if (termDiff > 0) {
-          if (bestPlan.prazo > requestedTerm) {
-            explanationMessage += `• Prazo: ${bestPlan.prazo} meses (${termDiff} meses a mais que os ${requestedTerm} meses solicitados)\n`;
-          } else {
-            explanationMessage += `• Prazo: ${bestPlan.prazo} meses (${termDiff} meses a menos que os ${requestedTerm} meses solicitados)\n`;
-          }
-        }
-        
-        explanationMessage += '\nEste é o plano mais próximo disponível em nosso sistema.';
+      // Garantir que seja um array
+      if (!Array.isArray(matchingPlans)) {
+        matchingPlans = [matchingPlans];
       }
 
-      // Preparar dados da cotação
+      // Verificar se é match exato (primeira cotação)
+      const firstPlan = matchingPlans[0];
+      const planValue = parseFloat((firstPlan['VALOR'] || '').replace(/[^\d,]/g, '').replace(',', '.'));
+      const planTerm = parseInt((firstPlan['PRAZO'] || '').replace(/\D/g, ''));
+      const isExactMatch = planValue && planTerm && 
+        (Math.abs(planValue - data.valor) < 0.01) && 
+        (planTerm === data.prazo);
+
+      console.log(`✅ ${matchingPlans.length} plano(s) encontrado(s):`);
+      matchingPlans.forEach((plan, index) => {
+        console.log(`   Plano ${index + 1}:`);
+        console.log(`     NOME DO BEM: ${plan['NOME DO BEM'] || 'N/A'}`);
+        console.log(`     VALOR: ${plan['VALOR'] || 'N/A'}`);
+        console.log(`     PRAZO: ${plan['PRAZO'] || 'N/A'}`);
+        console.log(`     1ª PARCELA: ${plan['1ª PARCELA'] || 'N/A'}`);
+        console.log(`     PLANO: ${plan['PLANO'] || 'N/A'}`);
+        console.log(`     TIPO DE VENDA: ${plan['TIPO DE VENDA'] || 'N/A'}`);
+      });
+
+      // Preparar dados da cotação usando array de objetos row completos
       const quotationData = {
         type: 'Consórcio de Imóvel',
-        value: bestPlan.valor,
-        months: bestPlan.prazo,
-        monthlyPayment: monthlyPayment,
-        adminFee: 18, // Taxa padrão para imóveis
-        details: `Plano: ${bestPlan.plano}\nTipo de Venda: ${bestPlan.tipoVenda}\nNome do Bem: ${bestPlan.nomeBem}${explanationMessage}`,
+        rawData: matchingPlans, // Array de objetos row completos do JSON
+        isExactMatch: isExactMatch,
+        requestedValue: data.valor,
+        requestedTerm: data.prazo,
         timestamp: new Date().toISOString(),
         source: 'pre-scraped',
-        isExactMatch: isExactMatch,
         customerData: {
           nome: data.nome,
           cpf: data.cpf,
           email: data.email,
           dataNascimento: data.dataNascimento
-        },
-        planDetails: {
-          nomeBem: bestPlan.nomeBem,
-          plano: bestPlan.plano,
-          tipoVenda: bestPlan.tipoVenda
         }
       };
       
