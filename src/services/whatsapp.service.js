@@ -616,6 +616,69 @@ Por favor, aguarde um momento enquanto preparo sua cotação... ⏱️✨`;
   }
 
   /**
+   * Formata combinações de cotações
+   */
+  formatCombinationsTable(combinations, type = 'Consórcio de Automóvel') {
+    if (!combinations || combinations.length === 0) {
+      return '';
+    }
+
+    // Determinar ícone baseado no tipo
+    let icon = '🚗'; // Padrão para automóvel
+    if (type && type.includes('Imóvel')) {
+      icon = '🏠';
+    } else if (type && type.includes('Automóvel')) {
+      icon = '🚗';
+    } else if (type && type.includes('Serviço')) {
+      icon = '🔧';
+    }
+
+    let table = '';
+    
+    // Adicionar linha separadora antes da primeira combinação
+    const firstComboNumberIcon = this.getNumberIcon(1);
+    table += '─'.repeat(28) + ` ${icon}${firstComboNumberIcon} ` + '─'.repeat(28);
+    table += '\n\n';
+    
+    combinations.forEach((combo, comboIndex) => {
+      const comboNumber = comboIndex + 1;
+      const comboNumberIcon = this.getNumberIcon(comboNumber);
+      const totalValue = combo.totalValue || 0;
+      const totalValueFormatted = totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+      
+      table += `*Combinação ${comboNumberIcon}* (Total: ${totalValueFormatted})\n\n`;
+      
+      combo.quotes.forEach((quote, quoteIndex) => {
+        const quoteNumber = quoteIndex + 1;
+        const quoteNumberIcon = this.getNumberIcon(quoteNumber);
+        
+        table += `${quoteNumberIcon} *NOME DO BEM:*\n`;
+        table += `${quote['NOME DO BEM'] || 'N/A'}\n\n`;
+        table += `*VALOR:* ${quote['VALOR'] || 'N/A'}\n`;
+        table += `*PRAZO:* ${quote['PRAZO'] || 'N/A'} meses\n`;
+        table += `*1ª PARCELA:* ${quote['1ª PARCELA'] || 'N/A'}\n`;
+        table += `*PLANO:* ${quote['PLANO'] || 'N/A'}\n`;
+        table += `*TIPO DE VENDA:* ${quote['TIPO DE VENDA'] || 'N/A'}\n`;
+        
+        if (quoteIndex < combo.quotes.length - 1) {
+          table += '\n';
+        }
+      });
+      
+      // Adicionar linha separadora com número entre combinações
+      if (comboIndex < combinations.length - 1) {
+        const nextComboNumber = comboIndex + 2;
+        const nextComboNumberIcon = this.getNumberIcon(nextComboNumber);
+        table += '\n';
+        table += '─'.repeat(28) + ` ${icon}${nextComboNumberIcon} ` + '─'.repeat(28);
+        table += '\n\n';
+      }
+    });
+    
+    return table;
+  }
+
+  /**
    * Envia cotação ao cliente
    */
   async sendQuotation(phone, quotationData) {
@@ -623,20 +686,48 @@ Por favor, aguarde um momento enquanto preparo sua cotação... ⏱️✨`;
     
     // Verificar se é match exato ou similar
     const isExactMatch = quotationData.isExactMatch !== false; // Default true se não especificado
+    const isCombination = quotationData.isCombination === true;
     
-    // rawData pode ser um array ou um objeto único
-    const rawData = quotationData.rawData || {};
-    const quotes = Array.isArray(rawData) ? rawData : [rawData];
     const requestedValue = quotationData.requestedValue || 0;
     const requestedTerm = quotationData.requestedTerm || 0;
-    
-    // Mensagem inicial
-    let message = `✅ *Vou apresentar algumas cotações que mais se aproximam do que você está procurando:*\n\n`;
-    
-    // Formatar tabela de cotações (passar o tipo para determinar o ícone)
     const consortiumType = quotationData.type || 'Consórcio de Automóvel';
-    const table = this.formatQuotesTableSimple(quotes, consortiumType);
-    message += table;
+    
+    let message = '';
+    
+    if (isCombination) {
+      // Mensagem de desculpas e explicação para combinações
+      const requestedValueFormatted = requestedValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+      message = `😔 *Peço desculpas*\n\n`;
+      message += `O valor solicitado (${requestedValueFormatted}) é maior que o valor máximo disponível atualmente no consórcio.\n\n`;
+      message += `Por isso, vou apresentar algumas combinações de cotações que, juntas, se aproximam do valor que você está procurando:\n\n`;
+      
+      // Formatar combinações de cotações
+      const rawData = quotationData.rawData || {};
+      const combinations = rawData.combinations || [];
+      const table = this.formatCombinationsTable(combinations, consortiumType);
+      message += table;
+    } else {
+      // Verificar se é match exato para mostrar mensagem de parabéns
+      if (isExactMatch) {
+        const requestedValueFormatted = requestedValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+        message = `🎉 *Parabéns!*\n\n`;
+        message += `Você encontrou a cotação exata que está procurando!\n\n`;
+        message += `*Valor solicitado:* ${requestedValueFormatted}\n`;
+        message += `*Prazo solicitado:* ${requestedTerm} meses\n\n`;
+        message += `Segue a cotação:\n\n`;
+      } else {
+        // Mensagem inicial para cotações normais (não exatas)
+        message = `✅ *Vou apresentar algumas cotações que mais se aproximam do que você está procurando:*\n\n`;
+      }
+      
+      // rawData pode ser um array ou um objeto único
+      const rawData = quotationData.rawData || {};
+      const quotes = Array.isArray(rawData) ? rawData : [rawData];
+      
+      // Formatar tabela de cotações (passar o tipo para determinar o ícone)
+      const table = this.formatQuotesTableSimple(quotes, consortiumType);
+      message += table;
+    }
     
     // Adicionar opções
     message += `\n*O que deseja fazer?*\n\n`;
@@ -649,17 +740,40 @@ Por favor, aguarde um momento enquanto preparo sua cotação... ⏱️✨`;
       console.log(`💰 COTAÇÃO ENVIADA [${timestamp}]`);
       console.log('─'.repeat(70));
       console.log(`👤 Para: ${phone}`);
-      console.log(`📊 Total de cotações: ${quotes.length}`);
-      quotes.forEach((quote, index) => {
-        console.log(`\n   Cotação ${index + 1}:`);
-        console.log(`   📊 NOME DO BEM: ${quote['NOME DO BEM'] || 'N/A'}`);
-        console.log(`   💵 VALOR: ${quote['VALOR'] || 'N/A'}`);
-        console.log(`   📅 PRAZO: ${quote['PRAZO'] || 'N/A'} meses`);
-        console.log(`   💳 1ª PARCELA: ${quote['1ª PARCELA'] || 'N/A'}`);
-        console.log(`   📋 PLANO: ${quote['PLANO'] || 'N/A'}`);
-        console.log(`   🏷️  TIPO DE VENDA: ${quote['TIPO DE VENDA'] || 'N/A'}`);
-      });
+      
+      if (isCombination) {
+        const rawData = quotationData.rawData || {};
+        const combinations = rawData.combinations || [];
+        console.log(`📊 Total de combinações: ${combinations.length}`);
+        combinations.forEach((combo, comboIndex) => {
+          console.log(`\n   Combinação ${comboIndex + 1} (Total: R$ ${combo.totalValue.toLocaleString('pt-BR')}):`);
+          combo.quotes.forEach((quote, quoteIndex) => {
+            console.log(`\n     Cotação ${quoteIndex + 1}:`);
+            console.log(`     📊 NOME DO BEM: ${quote['NOME DO BEM'] || 'N/A'}`);
+            console.log(`     💵 VALOR: ${quote['VALOR'] || 'N/A'}`);
+            console.log(`     📅 PRAZO: ${quote['PRAZO'] || 'N/A'} meses`);
+            console.log(`     💳 1ª PARCELA: ${quote['1ª PARCELA'] || 'N/A'}`);
+            console.log(`     📋 PLANO: ${quote['PLANO'] || 'N/A'}`);
+            console.log(`     🏷️  TIPO DE VENDA: ${quote['TIPO DE VENDA'] || 'N/A'}`);
+          });
+        });
+      } else {
+        const rawData = quotationData.rawData || {};
+        const quotes = Array.isArray(rawData) ? rawData : [rawData];
+        console.log(`📊 Total de cotações: ${quotes.length}`);
+        quotes.forEach((quote, index) => {
+          console.log(`\n   Cotação ${index + 1}:`);
+          console.log(`   📊 NOME DO BEM: ${quote['NOME DO BEM'] || 'N/A'}`);
+          console.log(`   💵 VALOR: ${quote['VALOR'] || 'N/A'}`);
+          console.log(`   📅 PRAZO: ${quote['PRAZO'] || 'N/A'} meses`);
+          console.log(`   💳 1ª PARCELA: ${quote['1ª PARCELA'] || 'N/A'}`);
+          console.log(`   📋 PLANO: ${quote['PLANO'] || 'N/A'}`);
+          console.log(`   🏷️  TIPO DE VENDA: ${quote['TIPO DE VENDA'] || 'N/A'}`);
+        });
+      }
+      
       console.log(`✅ Match Exato: ${isExactMatch ? 'SIM' : 'NÃO'}`);
+      console.log(`🔗 É Combinação: ${isCombination ? 'SIM' : 'NÃO'}`);
       console.log('═'.repeat(70) + '\n');
     }
 

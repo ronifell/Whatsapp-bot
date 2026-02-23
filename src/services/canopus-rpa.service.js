@@ -2184,6 +2184,123 @@ class CanopusRPAService {
   /**
    * Encontra o melhor plano baseado nos dados do cliente
    */
+  /**
+   * Encontra combinações de cotações que somam aproximadamente o valor solicitado
+   * Usa algoritmo otimizado para evitar problemas de memória
+   * @param {Array} validQuotes - Array de cotações válidas
+   * @param {number} targetValue - Valor alvo
+   * @param {number} maxCombinations - Número máximo de combinações a retornar
+   * @returns {Array} - Array de combinações (cada combinação é um array de cotações)
+   */
+  findQuoteCombinations(validQuotes, targetValue, maxCombinations = 3) {
+    console.log(`🔍 Buscando combinações de ${validQuotes.length} cotações para valor alvo: R$ ${targetValue.toLocaleString('pt-BR')}`);
+    
+    // STEP 1: Filtrar e ordenar cotações de forma inteligente
+    // Remover cotações muito pequenas ou muito grandes
+    const minQuoteValue = targetValue * 0.1; // Pelo menos 10% do alvo
+    const maxQuoteValue = targetValue * 0.6; // No máximo 60% do alvo (para permitir pelo menos 2 cotações)
+    const maxQuotesPerCombination = 5;
+    
+    const filteredQuotes = validQuotes
+      .filter(q => q.planValue >= minQuoteValue && q.planValue <= maxQuoteValue)
+      .sort((a, b) => b.planValue - a.planValue); // Ordenar do maior para o menor
+    
+    // Limitar a 50 cotações mais relevantes para evitar explosão combinatória
+    const topQuotes = filteredQuotes.slice(0, 50);
+    
+    console.log(`📊 ${topQuotes.length} cotações filtradas (de ${validQuotes.length} disponíveis)`);
+    
+    if (topQuotes.length < 2) {
+      console.log(`⚠️ Não há cotações suficientes para formar combinações`);
+      return [];
+    }
+    
+    const combinations = [];
+    const maxSearchDepth = Math.min(maxQuotesPerCombination, Math.ceil(targetValue / Math.min(...topQuotes.map(q => q.planValue))));
+    
+    // STEP 2: Usar abordagem iterativa limitada em vez de recursão completa
+    // Tentar combinações de 2, 3, 4, 5 cotações
+    for (let comboSize = 2; comboSize <= maxSearchDepth && comboSize <= maxQuotesPerCombination; comboSize++) {
+      if (combinations.length >= maxCombinations * 2) break;
+      
+      // Usar abordagem de "sliding window" para combinações pequenas
+      if (comboSize === 2) {
+        // Para 2 cotações, testar todas as combinações possíveis (limitado)
+        for (let i = 0; i < Math.min(topQuotes.length, 30); i++) {
+          for (let j = i + 1; j < Math.min(topQuotes.length, 30); j++) {
+            const sum = topQuotes[i].planValue + topQuotes[j].planValue;
+            if (sum <= targetValue * 1.2 && sum >= targetValue * 0.8) {
+              const difference = Math.abs(sum - targetValue);
+              combinations.push({
+                quotes: [topQuotes[i], topQuotes[j]],
+                totalValue: sum,
+                difference: difference
+              });
+              if (combinations.length >= maxCombinations * 3) break;
+            }
+          }
+          if (combinations.length >= maxCombinations * 3) break;
+        }
+      } else {
+        // Para 3+ cotações, usar busca limitada e inteligente
+        const generateLimited = (current, startIdx, currentSum, remaining) => {
+          if (remaining === 0) {
+            if (currentSum <= targetValue * 1.2 && currentSum >= targetValue * 0.8) {
+              const difference = Math.abs(currentSum - targetValue);
+              combinations.push({
+                quotes: [...current],
+                totalValue: currentSum,
+                difference: difference
+              });
+            }
+            return;
+          }
+          
+          // Limitar busca a apenas as primeiras 20 cotações para evitar explosão
+          const searchLimit = Math.min(startIdx + 20, topQuotes.length);
+          for (let i = startIdx; i < searchLimit && combinations.length < maxCombinations * 3; i++) {
+            const newSum = currentSum + topQuotes[i].planValue;
+            if (newSum <= targetValue * 1.3) {
+              current.push(topQuotes[i]);
+              generateLimited(current, i + 1, newSum, remaining - 1);
+              current.pop();
+            }
+          }
+        };
+        
+        generateLimited([], 0, 0, comboSize);
+      }
+    }
+    
+    console.log(`✅ ${combinations.length} combinações candidatas encontradas`);
+    
+    // STEP 3: Ordenar por menor diferença e retornar as melhores
+    combinations.sort((a, b) => a.difference - b.difference);
+    
+    // Retornar apenas combinações únicas (evitar duplicatas)
+    const uniqueCombinations = [];
+    const seen = new Set();
+    
+    for (const combo of combinations) {
+      const key = combo.quotes.map(q => q.quote['NOME DO BEM'] || '').sort().join('|');
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueCombinations.push(combo);
+        if (uniqueCombinations.length >= maxCombinations) {
+          break;
+        }
+      }
+    }
+    
+    console.log(`✅ ${uniqueCombinations.length} combinações únicas selecionadas`);
+    
+    return uniqueCombinations.map(combo => ({
+      quotes: combo.quotes.map(q => q.quote),
+      totalValue: combo.totalValue,
+      difference: combo.difference
+    }));
+  }
+
   findBestMatchingPlan(scrapedData, customerValue, customerTerm) {
     console.log(`🔍 Buscando cotação para: R$ ${customerValue.toLocaleString('pt-BR')}, ${customerTerm} meses`);
     try {
@@ -2239,6 +2356,47 @@ class CanopusRPAService {
       if (quotesWithDifferences.length === 0) {
         console.log(`⚠️ Nenhuma cotação válida encontrada`);
         return null;
+      }
+
+      // STEP 1.5: Verificar se o valor solicitado é > 1.5x o maior valor disponível
+      const maxAvailableValue = Math.max(...quotesWithDifferences.map(q => q.planValue));
+      const threshold = maxAvailableValue * 1.5;
+      
+      if (cleanCustomerValue > threshold) {
+        console.log(`📊 Valor solicitado (R$ ${cleanCustomerValue.toLocaleString('pt-BR')}) é ${(cleanCustomerValue / maxAvailableValue).toFixed(2)}x o maior valor disponível (R$ ${maxAvailableValue.toLocaleString('pt-BR')})`);
+        console.log(`🔍 Buscando combinações de cotações para atingir o valor solicitado...`);
+        
+        // Filtrar cotações com prazo similar (diferença de até 12 meses)
+        const quotesWithSimilarTerm = quotesWithDifferences.filter(q => q.termDifference <= 12);
+        
+        if (quotesWithSimilarTerm.length === 0) {
+          console.log(`⚠️ Nenhuma cotação com prazo similar encontrada, usando todas as cotações`);
+          // Se não houver cotações com prazo similar, usar todas
+          const combinations = this.findQuoteCombinations(quotesWithDifferences, cleanCustomerValue, 3);
+          
+          if (combinations.length > 0) {
+            console.log(`✅ ${combinations.length} combinação(ões) encontrada(s)`);
+            // Retornar estrutura especial para combinações
+            return {
+              isCombination: true,
+              combinations: combinations
+            };
+          }
+        } else {
+          const combinations = this.findQuoteCombinations(quotesWithSimilarTerm, cleanCustomerValue, 3);
+          
+          if (combinations.length > 0) {
+            console.log(`✅ ${combinations.length} combinação(ões) encontrada(s) com prazo similar`);
+            // Retornar estrutura especial para combinações
+            return {
+              isCombination: true,
+              combinations: combinations
+            };
+          }
+        }
+        
+        // Se não encontrou combinações, continuar com lógica normal
+        console.log(`⚠️ Não foi possível encontrar combinações adequadas, usando lógica padrão`);
       }
 
       // STEP 2: Encontrar a menor diferença de VALOR (cotação mais similar)
@@ -2330,42 +2488,69 @@ class CanopusRPAService {
       
       // Usar os dados extraídos para encontrar as melhores cotações
       let matchingPlans = null;
+      let isCombination = false;
       if (fullExtractionResult && fullExtractionResult.rows && fullExtractionResult.rows.length > 0) {
         console.log(`🔍 Buscando melhores cotações em ${fullExtractionResult.rows.length} cotações disponíveis...`);
         const matches = this.findBestMatchingPlan(fullExtractionResult, data.valor, data.prazo);
         if (matches) {
-          matchingPlans = Array.isArray(matches) ? matches : [matches];
-          console.log(`✅ ${matchingPlans.length} cotação(ões) encontrada(s) nos dados extraídos`);
+          // Verificar se é uma combinação
+          if (matches.isCombination && matches.combinations) {
+            isCombination = true;
+            matchingPlans = matches;
+            console.log(`✅ ${matches.combinations.length} combinação(ões) de cotações encontrada(s)`);
+          } else {
+            matchingPlans = Array.isArray(matches) ? matches : [matches];
+            console.log(`✅ ${matchingPlans.length} cotação(ões) encontrada(s) nos dados extraídos`);
+          }
         }
       }
 
-      if (!matchingPlans || matchingPlans.length === 0) {
+      if (!matchingPlans || (isCombination && (!matchingPlans.combinations || matchingPlans.combinations.length === 0)) || (!isCombination && matchingPlans.length === 0)) {
         throw new Error('Não foi possível encontrar nenhuma cotação disponível nos dados. Por favor, tente novamente mais tarde.');
       }
 
-      // Verificar se é match exato (primeira cotação)
-      const firstPlan = matchingPlans[0];
-      const planValue = parseFloat((firstPlan['VALOR'] || '').replace(/[^\d,]/g, '').replace(',', '.'));
-      const planTerm = parseInt((firstPlan['PRAZO'] || '').replace(/\D/g, ''));
-      const isExactMatch = planValue && planTerm && 
-        (Math.abs(planValue - data.valor) < 0.01) && 
-        (planTerm === data.prazo);
+      let isExactMatch = false;
+      
+      if (isCombination) {
+        // Para combinações, não é match exato
+        isExactMatch = false;
+        console.log(`✅ ${matchingPlans.combinations.length} combinação(ões) encontrada(s):`);
+        matchingPlans.combinations.forEach((combo, comboIndex) => {
+          console.log(`   Combinação ${comboIndex + 1} (Total: R$ ${combo.totalValue.toLocaleString('pt-BR')}):`);
+          combo.quotes.forEach((quote, quoteIndex) => {
+            console.log(`     Cotação ${quoteIndex + 1}:`);
+            console.log(`       NOME DO BEM: ${quote['NOME DO BEM'] || 'N/A'}`);
+            console.log(`       VALOR: ${quote['VALOR'] || 'N/A'}`);
+            console.log(`       PRAZO: ${quote['PRAZO'] || 'N/A'}`);
+            console.log(`       1ª PARCELA: ${quote['1ª PARCELA'] || 'N/A'}`);
+          });
+        });
+      } else {
+        // Verificar se é match exato (primeira cotação)
+        const firstPlan = matchingPlans[0];
+        const planValue = parseFloat((firstPlan['VALOR'] || '').replace(/[^\d,]/g, '').replace(',', '.'));
+        const planTerm = parseInt((firstPlan['PRAZO'] || '').replace(/\D/g, ''));
+        isExactMatch = planValue && planTerm && 
+          (Math.abs(planValue - data.valor) < 0.01) && 
+          (planTerm === data.prazo);
 
-      console.log(`✅ ${matchingPlans.length} cotação(ões) encontrada(s):`);
-      matchingPlans.forEach((plan, index) => {
-        console.log(`   Cotação ${index + 1}:`);
-        console.log(`     NOME DO BEM: ${plan['NOME DO BEM'] || 'N/A'}`);
-        console.log(`     VALOR: ${plan['VALOR'] || 'N/A'}`);
-        console.log(`     PRAZO: ${plan['PRAZO'] || 'N/A'}`);
-        console.log(`     1ª PARCELA: ${plan['1ª PARCELA'] || 'N/A'}`);
-        console.log(`     PLANO: ${plan['PLANO'] || 'N/A'}`);
-        console.log(`     TIPO DE VENDA: ${plan['TIPO DE VENDA'] || 'N/A'}`);
-      });
+        console.log(`✅ ${matchingPlans.length} cotação(ões) encontrada(s):`);
+        matchingPlans.forEach((plan, index) => {
+          console.log(`   Cotação ${index + 1}:`);
+          console.log(`     NOME DO BEM: ${plan['NOME DO BEM'] || 'N/A'}`);
+          console.log(`     VALOR: ${plan['VALOR'] || 'N/A'}`);
+          console.log(`     PRAZO: ${plan['PRAZO'] || 'N/A'}`);
+          console.log(`     1ª PARCELA: ${plan['1ª PARCELA'] || 'N/A'}`);
+          console.log(`     PLANO: ${plan['PLANO'] || 'N/A'}`);
+          console.log(`     TIPO DE VENDA: ${plan['TIPO DE VENDA'] || 'N/A'}`);
+        });
+      }
 
-      // Preparar dados da cotação usando array de objetos row completos
+      // Preparar dados da cotação usando array de objetos row completos ou combinações
       const quotationData = {
         type: 'Consórcio de Automóvel',
-        rawData: matchingPlans, // Array de objetos row completos do JSON
+        rawData: isCombination ? matchingPlans : matchingPlans, // Pode ser array ou objeto com combinações
+        isCombination: isCombination,
         isExactMatch: isExactMatch,
         requestedValue: data.valor,
         requestedTerm: data.prazo,
@@ -2418,42 +2603,69 @@ class CanopusRPAService {
       
       // Usar os dados extraídos para encontrar as melhores cotações
       let matchingPlans = null;
+      let isCombination = false;
       if (fullExtractionResult && fullExtractionResult.rows && fullExtractionResult.rows.length > 0) {
         console.log(`🔍 Buscando melhores cotações em ${fullExtractionResult.rows.length} cotações disponíveis...`);
         const matches = this.findBestMatchingPlan(fullExtractionResult, data.valor, data.prazo);
         if (matches) {
-          matchingPlans = Array.isArray(matches) ? matches : [matches];
-          console.log(`✅ ${matchingPlans.length} cotação(ões) encontrada(s) nos dados extraídos`);
+          // Verificar se é uma combinação
+          if (matches.isCombination && matches.combinations) {
+            isCombination = true;
+            matchingPlans = matches;
+            console.log(`✅ ${matches.combinations.length} combinação(ões) de cotações encontrada(s)`);
+          } else {
+            matchingPlans = Array.isArray(matches) ? matches : [matches];
+            console.log(`✅ ${matchingPlans.length} cotação(ões) encontrada(s) nos dados extraídos`);
+          }
         }
       }
 
-      if (!matchingPlans || matchingPlans.length === 0) {
+      if (!matchingPlans || (isCombination && (!matchingPlans.combinations || matchingPlans.combinations.length === 0)) || (!isCombination && matchingPlans.length === 0)) {
         throw new Error('Não foi possível encontrar nenhuma cotação disponível nos dados. Por favor, tente novamente mais tarde.');
       }
 
-      // Verificar se é match exato (primeira cotação)
-      const firstPlan = matchingPlans[0];
-      const planValue = parseFloat((firstPlan['VALOR'] || '').replace(/[^\d,]/g, '').replace(',', '.'));
-      const planTerm = parseInt((firstPlan['PRAZO'] || '').replace(/\D/g, ''));
-      const isExactMatch = planValue && planTerm && 
-        (Math.abs(planValue - data.valor) < 0.01) && 
-        (planTerm === data.prazo);
+      let isExactMatch = false;
+      
+      if (isCombination) {
+        // Para combinações, não é match exato
+        isExactMatch = false;
+        console.log(`✅ ${matchingPlans.combinations.length} combinação(ões) encontrada(s):`);
+        matchingPlans.combinations.forEach((combo, comboIndex) => {
+          console.log(`   Combinação ${comboIndex + 1} (Total: R$ ${combo.totalValue.toLocaleString('pt-BR')}):`);
+          combo.quotes.forEach((quote, quoteIndex) => {
+            console.log(`     Cotação ${quoteIndex + 1}:`);
+            console.log(`       NOME DO BEM: ${quote['NOME DO BEM'] || 'N/A'}`);
+            console.log(`       VALOR: ${quote['VALOR'] || 'N/A'}`);
+            console.log(`       PRAZO: ${quote['PRAZO'] || 'N/A'}`);
+            console.log(`       1ª PARCELA: ${quote['1ª PARCELA'] || 'N/A'}`);
+          });
+        });
+      } else {
+        // Verificar se é match exato (primeira cotação)
+        const firstPlan = matchingPlans[0];
+        const planValue = parseFloat((firstPlan['VALOR'] || '').replace(/[^\d,]/g, '').replace(',', '.'));
+        const planTerm = parseInt((firstPlan['PRAZO'] || '').replace(/\D/g, ''));
+        isExactMatch = planValue && planTerm && 
+          (Math.abs(planValue - data.valor) < 0.01) && 
+          (planTerm === data.prazo);
 
-      console.log(`✅ ${matchingPlans.length} cotação(ões) encontrada(s):`);
-      matchingPlans.forEach((plan, index) => {
-        console.log(`   Cotação ${index + 1}:`);
-        console.log(`     NOME DO BEM: ${plan['NOME DO BEM'] || 'N/A'}`);
-        console.log(`     VALOR: ${plan['VALOR'] || 'N/A'}`);
-        console.log(`     PRAZO: ${plan['PRAZO'] || 'N/A'}`);
-        console.log(`     1ª PARCELA: ${plan['1ª PARCELA'] || 'N/A'}`);
-        console.log(`     PLANO: ${plan['PLANO'] || 'N/A'}`);
-        console.log(`     TIPO DE VENDA: ${plan['TIPO DE VENDA'] || 'N/A'}`);
-      });
+        console.log(`✅ ${matchingPlans.length} cotação(ões) encontrada(s):`);
+        matchingPlans.forEach((plan, index) => {
+          console.log(`   Cotação ${index + 1}:`);
+          console.log(`     NOME DO BEM: ${plan['NOME DO BEM'] || 'N/A'}`);
+          console.log(`     VALOR: ${plan['VALOR'] || 'N/A'}`);
+          console.log(`     PRAZO: ${plan['PRAZO'] || 'N/A'}`);
+          console.log(`     1ª PARCELA: ${plan['1ª PARCELA'] || 'N/A'}`);
+          console.log(`     PLANO: ${plan['PLANO'] || 'N/A'}`);
+          console.log(`     TIPO DE VENDA: ${plan['TIPO DE VENDA'] || 'N/A'}`);
+        });
+      }
 
-      // Preparar dados da cotação usando array de objetos row completos
+      // Preparar dados da cotação usando array de objetos row completos ou combinações
       const quotationData = {
         type: 'Consórcio de Imóvel',
-        rawData: matchingPlans, // Array de objetos row completos do JSON
+        rawData: isCombination ? matchingPlans : matchingPlans, // Pode ser array ou objeto com combinações
+        isCombination: isCombination,
         isExactMatch: isExactMatch,
         requestedValue: data.valor,
         requestedTerm: data.prazo,
