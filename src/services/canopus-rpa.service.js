@@ -12,6 +12,86 @@ class CanopusRPAService {
     this.context = null;
     this.page = null;
     this.isLoggedIn = false;
+    this.currentUserAgent = null;
+  }
+
+  /**
+   * Gera um User-Agent realista e rotacionado
+   */
+  getRandomUserAgent() {
+    const userAgents = [
+      // Chrome on Windows (most common)
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      // Chrome on Windows (different versions)
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36',
+      // Edge on Windows
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0',
+      // Firefox on Windows
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+      // Chrome on Mac
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    ];
+    
+    const randomIndex = Math.floor(Math.random() * userAgents.length);
+    return userAgents[randomIndex];
+  }
+
+  /**
+   * Simula movimento de mouse humano
+   */
+  async simulateMouseMovement() {
+    try {
+      // Movimento aleatório suave do mouse
+      const viewport = this.page.viewportSize();
+      if (!viewport) return;
+
+      const startX = Math.random() * viewport.width;
+      const startY = Math.random() * viewport.height;
+      const endX = Math.random() * viewport.width;
+      const endY = Math.random() * viewport.height;
+
+      // Movimento em múltiplos passos para parecer mais humano
+      const steps = 5 + Math.floor(Math.random() * 5);
+      for (let i = 0; i <= steps; i++) {
+        const progress = i / steps;
+        const x = startX + (endX - startX) * progress;
+        const y = startY + (endY - startY) * progress;
+        
+        await this.page.mouse.move(x, y, { steps: 1 });
+        await this.page.waitForTimeout(50 + Math.random() * 50);
+      }
+    } catch (error) {
+      // Ignorar erros de movimento de mouse
+    }
+  }
+
+  /**
+   * Simula comportamento humano: pequena pausa aleatória
+   */
+  async humanDelay(min = 500, max = 2000) {
+    const delay = min + Math.random() * (max - min);
+    await this.page.waitForTimeout(delay);
+  }
+
+  /**
+   * Simula scroll humano
+   */
+  async humanScroll(direction = 'down', amount = 200) {
+    try {
+      const scrollAmount = direction === 'down' ? amount : -amount;
+      const steps = 3 + Math.floor(Math.random() * 3);
+      const stepSize = scrollAmount / steps;
+
+      for (let i = 0; i < steps; i++) {
+        await this.page.mouse.wheel(0, stepSize);
+        await this.page.waitForTimeout(100 + Math.random() * 100);
+      }
+    } catch (error) {
+      // Ignorar erros de scroll
+    }
   }
 
   /**
@@ -21,6 +101,10 @@ class CanopusRPAService {
     try {
       console.log('🚀 Iniciando navegador...');
       
+      // Rotacionar User-Agent
+      this.currentUserAgent = this.getRandomUserAgent();
+      console.log(`🌐 User-Agent: ${this.currentUserAgent.substring(0, 60)}...`);
+      
       this.browser = await chromium.launch({
         headless: headless,
         args: [
@@ -28,13 +112,86 @@ class CanopusRPAService {
           '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
-          '--disable-gpu'
+          '--disable-gpu',
+          '--disable-blink-features=AutomationControlled', // Remove automation flags
+          '--disable-features=IsolateOrigins,site-per-process',
+          '--disable-web-security',
+          '--disable-features=VizDisplayCompositor'
         ]
       });
 
+      // Gerar viewport aleatório mas realista
+      const viewports = [
+        { width: 1920, height: 1080 },
+        { width: 1366, height: 768 },
+        { width: 1536, height: 864 },
+        { width: 1440, height: 900 },
+        { width: 1280, height: 720 }
+      ];
+      const randomViewport = viewports[Math.floor(Math.random() * viewports.length)];
+
       this.context = await this.browser.newContext({
-        viewport: { width: 1920, height: 1080 },
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        viewport: randomViewport,
+        userAgent: this.currentUserAgent,
+        locale: 'pt-BR',
+        timezoneId: 'America/Sao_Paulo',
+        // Adicionar permissões realistas
+        permissions: ['geolocation'],
+        // Simular dispositivo real
+        deviceScaleFactor: 1,
+        isMobile: false,
+        hasTouch: false,
+        // Cores e mídia
+        colorScheme: 'light',
+        reducedMotion: 'no-preference',
+        forcedColors: 'none',
+        extraHTTPHeaders: {
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+          'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Connection': 'keep-alive',
+          'Upgrade-Insecure-Requests': '1',
+          'Sec-Fetch-Dest': 'document',
+          'Sec-Fetch-Mode': 'navigate',
+          'Sec-Fetch-Site': 'none',
+          'Sec-Fetch-User': '?1',
+          'Cache-Control': 'max-age=0',
+          'DNT': '1',
+          'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+          'sec-ch-ua-mobile': '?0',
+          'sec-ch-ua-platform': '"Windows"'
+        }
+      });
+
+      // Remover sinais de automação via JavaScript
+      await this.context.addInitScript(() => {
+        // Remover webdriver flag
+        Object.defineProperty(navigator, 'webdriver', {
+          get: () => false,
+        });
+
+        // Sobrescrever plugins
+        Object.defineProperty(navigator, 'plugins', {
+          get: () => [1, 2, 3, 4, 5],
+        });
+
+        // Sobrescrever languages
+        Object.defineProperty(navigator, 'languages', {
+          get: () => ['pt-BR', 'pt', 'en-US', 'en'],
+        });
+
+        // Adicionar Chrome object
+        window.chrome = {
+          runtime: {},
+        };
+
+        // Sobrescrever permissions
+        const originalQuery = window.navigator.permissions.query;
+        window.navigator.permissions.query = (parameters) => (
+          parameters.name === 'notifications' ?
+            Promise.resolve({ state: Notification.permission }) :
+            originalQuery(parameters)
+        );
       });
 
       // Definir timeout padrão maior para operações (2 minutos)
@@ -44,6 +201,10 @@ class CanopusRPAService {
       
       // Definir timeout padrão também na página
       this.page.setDefaultTimeout(120000);
+
+      // Simular comportamento humano inicial: pequeno movimento de mouse
+      await this.simulateMouseMovement();
+      await this.humanDelay(300, 800);
       
       console.log('✅ Navegador iniciado');
       return true;
@@ -96,8 +257,10 @@ class CanopusRPAService {
       }
     }
     
-    // Aguardar um pouco para garantir que elementos dinâmicos carregaram
-    await this.page.waitForTimeout(2000);
+      // Aguardar um pouco para garantir que elementos dinâmicos carregaram
+      // Adicionar comportamento humano: pequeno movimento de mouse
+      await this.simulateMouseMovement();
+      await this.humanDelay(1000, 2000);
   }
 
   /**
@@ -106,19 +269,31 @@ class CanopusRPAService {
    */
   async fillAngularField(element, value) {
     try {
+      // Mover mouse para o campo antes de clicar (comportamento humano)
+      const box = await element.boundingBox();
+      if (box) {
+        await this.page.mouse.move(
+          box.x + box.width / 2 + (Math.random() - 0.5) * 10,
+          box.y + box.height / 2 + (Math.random() - 0.5) * 10,
+          { steps: 3 + Math.floor(Math.random() * 3) }
+        );
+        await this.humanDelay(100, 300);
+      }
+
       // Clicar no campo para focar
-      await element.click({ timeout: 5000 }); // Aumentado para 5 segundos
-      await this.page.waitForTimeout(300); // Aumentado para 300ms
+      await element.click({ timeout: 5000 });
+      await this.humanDelay(200, 400);
       
-      // Limpar campo (Ctrl+A + Delete)
+      // Limpar campo (Ctrl+A + Delete) com delays humanos
       await element.press('Control+a');
-      await this.page.waitForTimeout(150); // Aumentado para 150ms
+      await this.humanDelay(100, 200);
       await element.press('Delete');
-      await this.page.waitForTimeout(150); // Aumentado para 150ms
+      await this.humanDelay(100, 200);
       
-      // Digitar valor (simula digitação real, dispara eventos input)
-      await element.type(value, { delay: 50 });
-      await this.page.waitForTimeout(500); // Aumentado para 500ms
+      // Digitar valor com delay variável entre caracteres (simula digitação humana)
+      const typingDelay = 30 + Math.random() * 40; // 30-70ms entre caracteres
+      await element.type(value, { delay: typingDelay });
+      await this.humanDelay(300, 600);
       
       // Disparar eventos adicionais que Angular Material pode precisar
       await element.evaluate((el, val) => {
@@ -496,8 +671,10 @@ class CanopusRPAService {
       }
 
       // Aguardar um pouco para Angular processar as mudanças e validar o formulário
+      // Simular comportamento humano: pequeno movimento de mouse
       console.log('⏳ Aguardando validação do formulário Angular...');
-      await this.page.waitForTimeout(3000); // Aumentado para 3 segundos
+      await this.simulateMouseMovement();
+      await this.humanDelay(2000, 4000);
 
       // Procurar botão de login
       const loginButtonSelectors = [
@@ -545,6 +722,16 @@ class CanopusRPAService {
             for (const element of elements) {
               try {
                 if (await element.isVisible({ timeout: 1000 })) {
+                  // Mover mouse para o botão antes de clicar (comportamento humano)
+                  const box = await element.boundingBox();
+                  if (box) {
+                    await this.page.mouse.move(
+                      box.x + box.width / 2 + (Math.random() - 0.5) * 5,
+                      box.y + box.height / 2 + (Math.random() - 0.5) * 5,
+                      { steps: 2 + Math.floor(Math.random() * 2) }
+                    );
+                    await this.humanDelay(100, 200);
+                  }
                   await element.click();
                   console.log(`🔘 Botão de login clicado (seletor: ${selector})`);
                   buttonClicked = true;
@@ -718,36 +905,206 @@ class CanopusRPAService {
       await this.navigateTo(secondLoginUrl);
       
       // Aguardar elementos carregarem
+      // Simular comportamento humano: movimento de mouse e scroll
       console.log('⏳ Aguardando elementos da segunda página carregarem...');
-      await this.page.waitForTimeout(3000);
+      await this.simulateMouseMovement();
+      await this.humanScroll('down', 100);
+      await this.humanDelay(3000, 6000);
       
-      // Preencher campo de usuário (formulário HTML simples, não Angular)
+      // Debug: Listar todos os inputs encontrados na página
+      console.log('🔍 Procurando campos de formulário na segunda página...');
+      try {
+        const allInputs = await this.page.locator('input').all();
+        console.log(`   Encontrados ${allInputs.length} campos input na página`);
+        for (let i = 0; i < Math.min(allInputs.length, 10); i++) {
+          try {
+            const input = allInputs[i];
+            const type = await input.getAttribute('type') || 'text';
+            const name = await input.getAttribute('name') || '';
+            const id = await input.getAttribute('id') || '';
+            const placeholder = await input.getAttribute('placeholder') || '';
+            const className = await input.getAttribute('class') || '';
+            console.log(`   Input ${i + 1}: type="${type}", name="${name}", id="${id}", placeholder="${placeholder}", class="${className.substring(0, 50)}"`);
+          } catch (e) {
+            // Ignorar erros ao ler atributos
+          }
+        }
+      } catch (e) {
+        console.log('   ⚠️  Não foi possível listar inputs');
+      }
+      
+      // Preencher campo de usuário - tentar múltiplos seletores com comportamento humano
       console.log('📝 Preenchendo campo de usuário...');
-      const usernameField = await this.page.locator('input[name="login"], input#login').first();
-      await usernameField.waitFor({ state: 'visible', timeout: 10000 });
-      await usernameField.click();
-      await this.page.waitForTimeout(200);
-      await usernameField.fill(config.canopus.username);
-      console.log('✅ Usuário preenchido na segunda página');
+      const usernameSelectors = [
+        'input[name="login"]',
+        'input#login',
+        'input[name="usuario"]',
+        'input#usuario',
+        'input[name="user"]',
+        'input#user',
+        'input[type="text"]:not(input[type="password"])',
+        'form input[type="text"]:first-of-type',
+        'input:not([type="password"]):not([type="submit"]):not([type="button"]):not([type="hidden"])'
+      ];
       
-      // Preencher campo de senha
+      let usernameFilled = false;
+      for (const selector of usernameSelectors) {
+        try {
+          const elements = await this.page.locator(selector).all();
+          if (elements.length > 0) {
+            for (const element of elements) {
+              try {
+                if (await element.isVisible({ timeout: 2000 })) {
+                  const type = await element.getAttribute('type');
+                  if (type === 'password' || type === 'submit' || type === 'button' || type === 'hidden') continue;
+                  
+                  // Usar fillAngularField para comportamento humano (mesmo que não seja Angular)
+                  await this.fillAngularField(element, config.canopus.username);
+                  console.log(`✅ Usuário preenchido na segunda página (seletor: ${selector})`);
+                  usernameFilled = true;
+                  break;
+                }
+              } catch (e) {
+                // Tentar próximo elemento
+              }
+            }
+            if (usernameFilled) break;
+          }
+        } catch (e) {
+          // Tentar próximo seletor
+        }
+      }
+      
+      if (!usernameFilled) {
+        throw new Error('Não foi possível encontrar o campo de usuário na segunda página. Verifique os seletores.');
+      }
+      
+      // Preencher campo de senha - tentar múltiplos seletores com comportamento humano
       console.log('📝 Preenchendo campo de senha...');
-      const passwordField = await this.page.locator('input[name="senha"], input#senha').first();
-      await passwordField.waitFor({ state: 'visible', timeout: 10000 });
-      await passwordField.click();
-      await this.page.waitForTimeout(200);
-      await passwordField.fill(config.canopus.password);
-      console.log('✅ Senha preenchida na segunda página');
+      const passwordSelectors = [
+        'input[name="senha"]',
+        'input#senha',
+        'input[name="password"]',
+        'input#password',
+        'input[type="password"]'
+      ];
       
-      // Aguardar um pouco antes de clicar no botão
-      await this.page.waitForTimeout(1000);
+      let passwordFilled = false;
+      for (const selector of passwordSelectors) {
+        try {
+          const elements = await this.page.locator(selector).all();
+          if (elements.length > 0) {
+            for (const element of elements) {
+              try {
+                if (await element.isVisible({ timeout: 2000 })) {
+                  // Mover mouse para o campo antes de preencher
+                  const box = await element.boundingBox();
+                  if (box) {
+                    await this.page.mouse.move(
+                      box.x + box.width / 2 + (Math.random() - 0.5) * 10,
+                      box.y + box.height / 2 + (Math.random() - 0.5) * 10,
+                      { steps: 3 + Math.floor(Math.random() * 3) }
+                    );
+                    await this.humanDelay(100, 300);
+                  }
+                  
+                  await element.click();
+                  await this.humanDelay(200, 400);
+                  
+                  // Digitar com delay variável (simula digitação humana)
+                  const typingDelay = 40 + Math.random() * 30; // 40-70ms entre caracteres
+                  await element.type(config.canopus.password, { delay: typingDelay });
+                  await this.humanDelay(300, 600);
+                  
+                  console.log(`✅ Senha preenchida na segunda página (seletor: ${selector})`);
+                  passwordFilled = true;
+                  break;
+                }
+              } catch (e) {
+                // Tentar próximo elemento
+              }
+            }
+            if (passwordFilled) break;
+          }
+        } catch (e) {
+          // Tentar próximo seletor
+        }
+      }
       
-      // Clicar no botão de login
+      if (!passwordFilled) {
+        throw new Error('Não foi possível encontrar o campo de senha na segunda página. Verifique os seletores.');
+      }
+      
+      // Aguardar um pouco antes de clicar no botão (comportamento humano)
+      await this.simulateMouseMovement();
+      await this.humanDelay(800, 1500);
+      
+      // Clicar no botão de login - tentar múltiplos seletores
       console.log('🔘 Clicando no botão de login...');
-      const loginButton = await this.page.locator('input[type="submit"].btn.btn-primary.btn-block, input[value="Entrar"]').first();
-      await loginButton.waitFor({ state: 'visible', timeout: 10000 });
-      await loginButton.click();
-      console.log('✅ Botão de login clicado');
+      const loginButtonSelectors = [
+        'input[type="submit"]',
+        'button[type="submit"]',
+        'input[value="Entrar"]',
+        'button:has-text("Entrar")',
+        'input.btn.btn-primary',
+        'button.btn.btn-primary',
+        'input[class*="btn"]',
+        'button[class*="btn"]',
+        'form input[type="submit"]',
+        'form button[type="submit"]'
+      ];
+      
+      let buttonClicked = false;
+      for (const selector of loginButtonSelectors) {
+        try {
+          const elements = await this.page.locator(selector).all();
+          if (elements.length > 0) {
+            for (const element of elements) {
+              try {
+                if (await element.isVisible({ timeout: 2000 })) {
+                  // Mover mouse para o botão antes de clicar
+                  const box = await element.boundingBox();
+                  if (box) {
+                    await this.page.mouse.move(
+                      box.x + box.width / 2 + (Math.random() - 0.5) * 5,
+                      box.y + box.height / 2 + (Math.random() - 0.5) * 5,
+                      { steps: 2 + Math.floor(Math.random() * 2) }
+                    );
+                    await this.humanDelay(100, 200);
+                  }
+                  await element.click();
+                  console.log(`✅ Botão de login clicado (seletor: ${selector})`);
+                  buttonClicked = true;
+                  break;
+                }
+              } catch (e) {
+                // Tentar próximo elemento
+              }
+            }
+            if (buttonClicked) break;
+          }
+        } catch (e) {
+          // Tentar próximo seletor
+        }
+      }
+      
+      if (!buttonClicked) {
+        // Tentar estratégia alternativa: pressionar Enter no campo de senha
+        try {
+          const passwordField = await this.page.locator('input[type="password"]').first();
+          if (await passwordField.isVisible({ timeout: 2000 })) {
+            await passwordField.press('Enter');
+            console.log('✅ Enter pressionado no campo de senha');
+            buttonClicked = true;
+          }
+        } catch (e) {
+          // Ignorar
+        }
+      }
+      
+      if (!buttonClicked) {
+        throw new Error('Não foi possível encontrar o botão de login na segunda página. Verifique os seletores.');
+      }
       
       // Aguardar navegação após login
       console.log('⏳ Aguardando resposta do servidor após segundo login...');
@@ -1003,8 +1360,18 @@ class CanopusRPAService {
       if (!radioFound) {
         // Tentar estratégia alternativa: clicar diretamente no span
         console.log('⚠️  Tentando clicar diretamente no span...');
+        // Mover mouse para o span antes de clicar
+        const box = await ipcaSpan.boundingBox();
+        if (box) {
+          await this.page.mouse.move(
+            box.x + box.width / 2 + (Math.random() - 0.5) * 5,
+            box.y + box.height / 2 + (Math.random() - 0.5) * 5,
+            { steps: 2 + Math.floor(Math.random() * 2) }
+          );
+          await this.humanDelay(100, 200);
+        }
         await ipcaSpan.click();
-        await this.page.waitForTimeout(1000);
+        await this.humanDelay(800, 1200);
         
         // Verificar se funcionou
         const clicked = await this.page.evaluate(() => {
@@ -1093,9 +1460,20 @@ class CanopusRPAService {
       
       console.log('✅ Span "Selecione..." encontrado');
       
+      // Mover mouse para o dropdown antes de clicar (comportamento humano)
+      const box = await selectSpan.boundingBox();
+      if (box) {
+        await this.page.mouse.move(
+          box.x + box.width / 2 + (Math.random() - 0.5) * 5,
+          box.y + box.height / 2 + (Math.random() - 0.5) * 5,
+          { steps: 2 + Math.floor(Math.random() * 2) }
+        );
+        await this.humanDelay(100, 200);
+      }
+      
       // Clicar no span para abrir o dropdown
       await selectSpan.click();
-      await this.page.waitForTimeout(1000);
+      await this.humanDelay(800, 1500);
       
       // Procurar e clicar na opção "AUTOMOVEIS"
       // Pode ser um link, option, ou outro elemento dentro do dropdown
@@ -1141,6 +1519,16 @@ class CanopusRPAService {
               const text = await element.textContent();
               if (text && (text.includes('AUTOMOVEIS') || text.includes('AUTOMÓVEIS') || text.includes('Automoveis') || text.includes('Automóveis'))) {
                 if (await element.isVisible({ timeout: 1000 })) {
+                  // Mover mouse para a opção antes de clicar
+                  const box = await element.boundingBox();
+                  if (box) {
+                    await this.page.mouse.move(
+                      box.x + box.width / 2 + (Math.random() - 0.5) * 3,
+                      box.y + box.height / 2 + (Math.random() - 0.5) * 3,
+                      { steps: 2 }
+                    );
+                    await this.humanDelay(50, 150);
+                  }
                   await element.click();
                   console.log('✅ Opção "AUTOMOVEIS" selecionada (busca por texto)');
                   optionSelected = true;
@@ -1179,9 +1567,20 @@ class CanopusRPAService {
       
       console.log('✅ Span "Selecione..." encontrado');
       
+      // Mover mouse para o dropdown antes de clicar (comportamento humano)
+      const box = await selectSpan.boundingBox();
+      if (box) {
+        await this.page.mouse.move(
+          box.x + box.width / 2 + (Math.random() - 0.5) * 5,
+          box.y + box.height / 2 + (Math.random() - 0.5) * 5,
+          { steps: 2 + Math.floor(Math.random() * 2) }
+        );
+        await this.humanDelay(100, 200);
+      }
+      
       // Clicar no span para abrir o dropdown
       await selectSpan.click();
-      await this.page.waitForTimeout(1000);
+      await this.humanDelay(800, 1500);
       
       // Procurar e clicar na opção "IMOVEIS"
       // Pode ser um link, option, ou outro elemento dentro do dropdown
@@ -1227,6 +1626,16 @@ class CanopusRPAService {
               const text = await element.textContent();
               if (text && (text.includes('IMOVEIS') || text.includes('IMÓVEIS') || text.includes('Imoveis') || text.includes('Imóveis'))) {
                 if (await element.isVisible({ timeout: 1000 })) {
+                  // Mover mouse para a opção antes de clicar
+                  const box = await element.boundingBox();
+                  if (box) {
+                    await this.page.mouse.move(
+                      box.x + box.width / 2 + (Math.random() - 0.5) * 3,
+                      box.y + box.height / 2 + (Math.random() - 0.5) * 3,
+                      { steps: 2 }
+                    );
+                    await this.humanDelay(50, 150);
+                  }
                   await element.click();
                   console.log('✅ Opção "IMOVEIS" selecionada (busca por texto)');
                   optionSelected = true;
