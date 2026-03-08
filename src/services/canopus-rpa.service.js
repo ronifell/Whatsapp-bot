@@ -780,19 +780,81 @@ class CanopusRPAService {
       const cookies = await this.context.cookies();
       console.log(`🍪 Mantendo ${cookies.length} cookies da primeira sessão`);
       
-      // Adicionar referer da primeira página
-      await this.page.setExtraHTTPHeaders({
-        'Referer': config.canopus.url
-      });
+      // Estratégia 1: Tentar encontrar um link/button na primeira página que leva à segunda
+      console.log('🔍 Procurando link ou botão para acessar o sistema AFV...');
+      let linkFound = false;
       
-      console.log(`🔐 Navegando para segunda página de login: ${secondLoginUrl}`);
+      try {
+        // Procurar por links que contenham "afv", "sistema", ou URLs relacionadas
+        const possibleLinks = await this.page.locator('a[href*="afv"], a[href*="Sistema"], a:has-text("AFV"), a:has-text("Sistema"), button[onclick*="afv"], button[onclick*="Sistema"]').all();
+        
+        if (possibleLinks.length > 0) {
+          console.log(`   Encontrados ${possibleLinks.length} possíveis links/botões`);
+          for (const link of possibleLinks) {
+            try {
+              if (await link.isVisible({ timeout: 2000 })) {
+                console.log('   Tentando clicar em link encontrado...');
+                await link.click();
+                await this.page.waitForTimeout(5000);
+                
+                // Verificar se a URL mudou para a segunda página
+                const currentUrl = this.page.url();
+                if (currentUrl.includes('afv.consorciocanopus.com.br') || currentUrl.includes('Sistema')) {
+                  console.log('✅ Acessado segunda página através de link!');
+                  linkFound = true;
+                  break;
+                }
+              }
+            } catch (e) {
+              // Continuar tentando outros links
+            }
+          }
+        }
+      } catch (e) {
+        console.log('   Nenhum link encontrado na primeira página');
+      }
       
-      // Tentar navegação com retries para lidar com connection reset
-      await this.navigateTo(secondLoginUrl, {
-        maxRetries: 5,
-        retryDelay: 10000, // 10 segundos entre tentativas
-        timeout: 120000
-      });
+      // Estratégia 2: Se não encontrou link, tentar navegação direta com nova página/tab
+      if (!linkFound) {
+        console.log('⚠️  Link não encontrado, tentando criar nova página no mesmo contexto...');
+        try {
+          // Criar nova página no mesmo contexto (mantém cookies)
+          const newPage = await this.context.newPage();
+          
+          // Adicionar referer
+          await newPage.setExtraHTTPHeaders({
+            'Referer': config.canopus.url
+          });
+          
+          // Fechar página antiga e usar a nova
+          await this.page.close();
+          this.page = newPage;
+          
+          console.log(`🔐 Navegando para segunda página de login: ${secondLoginUrl}`);
+          
+          // Tentar navegação com retries
+          await this.navigateTo(secondLoginUrl, {
+            maxRetries: 3,
+            retryDelay: 15000, // 15 segundos entre tentativas
+            timeout: 120000
+          });
+        } catch (e) {
+          // Se falhar, tentar na página original
+          console.log('⚠️  Nova página falhou, tentando na página original...');
+          await this.page.setExtraHTTPHeaders({
+            'Referer': config.canopus.url
+          });
+          
+          console.log(`🔐 Navegando para segunda página de login: ${secondLoginUrl}`);
+          
+          // Tentar navegação com retries
+          await this.navigateTo(secondLoginUrl, {
+            maxRetries: 3,
+            retryDelay: 15000,
+            timeout: 120000
+          });
+        }
+      }
       
       // Aguardar elementos carregarem
       console.log('⏳ Aguardando elementos da segunda página carregarem...');
