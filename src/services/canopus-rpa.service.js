@@ -116,7 +116,17 @@ class CanopusRPAService {
           '--disable-blink-features=AutomationControlled', // Remove automation flags
           '--disable-features=IsolateOrigins,site-per-process',
           '--disable-web-security',
-          '--disable-features=VizDisplayCompositor'
+          '--disable-features=VizDisplayCompositor',
+          // Adicionar flags para melhorar compatibilidade em VPS
+          '--disable-software-rasterizer',
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding',
+          '--disable-features=TranslateUI',
+          '--disable-ipc-flooding-protection',
+          // Melhorar estabilidade de conexão
+          '--enable-features=NetworkService,NetworkServiceInProcess',
+          '--force-color-profile=srgb'
         ]
       });
 
@@ -192,6 +202,25 @@ class CanopusRPAService {
             Promise.resolve({ state: Notification.permission }) :
             originalQuery(parameters)
         );
+        
+        // Adicionar mais propriedades para parecer navegador real
+        Object.defineProperty(navigator, 'hardwareConcurrency', {
+          get: () => 8,
+        });
+        
+        Object.defineProperty(navigator, 'deviceMemory', {
+          get: () => 8,
+        });
+        
+        // Sobrescrever getBattery se existir
+        if (navigator.getBattery) {
+          navigator.getBattery = () => Promise.resolve({
+            charging: true,
+            chargingTime: 0,
+            dischargingTime: Infinity,
+            level: 1
+          });
+        }
       });
 
       // Definir timeout padrão maior para operações (2 minutos)
@@ -261,6 +290,12 @@ class CanopusRPAService {
           const gotoOptions = { timeout: timeout };
           if (strategy.waitUntil) {
             gotoOptions.waitUntil = strategy.waitUntil;
+          }
+          
+          // Se estamos navegando para a segunda página de login, adicionar referrer
+          if (url.includes('afv.consorciocanopus.com.br') && this.page.url().includes('parceiros.consorciocanopus.com.br')) {
+            gotoOptions.referer = this.page.url();
+            console.log(`   🔗 Usando referrer: ${gotoOptions.referer.substring(0, 60)}...`);
           }
           
           await this.page.goto(url, gotoOptions);
@@ -1002,6 +1037,29 @@ class CanopusRPAService {
                   
                   console.log(`   ✅ Botão AFV encontrado: texto="${text}" class="${className}"`);
                   
+                  // Tentar extrair URL real do link antes de clicar
+                  let extractedUrl = null;
+                  try {
+                    // Tentar encontrar um link pai (a tag) que contém este span
+                    const parentLink = await button.locator('xpath=ancestor::a').first();
+                    if (await parentLink.count() > 0) {
+                      extractedUrl = await parentLink.getAttribute('href');
+                      if (extractedUrl) {
+                        // Se for URL relativa, converter para absoluta
+                        if (extractedUrl.startsWith('/')) {
+                          const baseUrl = new URL(this.page.url()).origin;
+                          extractedUrl = baseUrl + extractedUrl;
+                        } else if (!extractedUrl.startsWith('http')) {
+                          const baseUrl = new URL(this.page.url()).origin;
+                          extractedUrl = baseUrl + '/' + extractedUrl;
+                        }
+                        console.log(`   🔗 URL extraída do link: ${extractedUrl}`);
+                      }
+                    }
+                  } catch (e) {
+                    // Continuar sem URL extraída
+                  }
+                  
                   // Mover mouse para o botão antes de clicar (comportamento humano)
                   const box = await button.boundingBox();
                   if (box) {
@@ -1028,6 +1086,11 @@ class CanopusRPAService {
                     }
                   } catch (e) {
                     // Continuar com o span
+                  }
+                  
+                  // Se extraímos uma URL e ela aponta para AFV, usar navegação direta como fallback
+                  if (extractedUrl && extractedUrl.includes('afv.consorciocanopus.com.br')) {
+                    console.log(`   💡 URL extraída aponta para AFV, será usada como fallback se o clique falhar`);
                   }
                   
                   // Aguardar por possíveis novas páginas/abas
@@ -1096,6 +1159,27 @@ class CanopusRPAService {
                     }
                   } else {
                     console.log(`   ⚠️  URL não mudou ou não é a página esperada. Tentando próximo elemento...`);
+                    
+                    // Se temos uma URL extraída e o clique não funcionou, tentar navegação direta
+                    if (extractedUrl && extractedUrl.includes('afv.consorciocanopus.com.br')) {
+                      console.log(`   🔄 Tentando navegação direta com URL extraída...`);
+                      try {
+                        await this.page.goto(extractedUrl, {
+                          waitUntil: 'domcontentloaded',
+                          timeout: 60000,
+                          referer: initialUrl
+                        });
+                        await this.humanDelay(2000, 3000);
+                        const directNavUrl = this.page.url();
+                        if (directNavUrl.includes('afv.consorciocanopus.com.br')) {
+                          console.log(`   ✅ Navegação direta bem-sucedida! URL: ${directNavUrl}`);
+                          navigationSuccess = true;
+                          break;
+                        }
+                      } catch (directNavError) {
+                        console.log(`   ⚠️  Navegação direta também falhou: ${directNavError.message.substring(0, 50)}`);
+                      }
+                    }
                   }
                 }
               } catch (e) {
@@ -1177,20 +1261,62 @@ class CanopusRPAService {
       }
       
       // Estratégia 2: Tentar criar nova página no mesmo contexto e navegar
+      // IMPORTANTE: Manter cookies e sessão da primeira página
       if (!navigationSuccess) {
         try {
           console.log('🔍 Estratégia 2: Criando nova página no mesmo contexto...');
+          
+          // Aguardar um pouco antes de criar nova página (comportamento humano)
+          await this.humanDelay(2000, 3000);
+          
+          // Obter URL atual e cookies da página atual para usar como referrer
+          const currentUrl = this.page.url();
+          const cookies = await this.context.cookies();
+          
+          console.log(`   📋 Copiando ${cookies.length} cookies da sessão atual...`);
+          
           const newPage = await this.context.newPage();
           newPage.setDefaultTimeout(120000);
           
-          // Tentar navegar na nova página
-          await newPage.goto(secondLoginUrl, { 
-            waitUntil: 'domcontentloaded',
-            timeout: 60000 
-          }).catch(async (e) => {
-            // Se falhar, tentar sem waitUntil
-            await newPage.goto(secondLoginUrl, { timeout: 60000 });
-          });
+          // Definir cookies na nova página ANTES de navegar
+          if (cookies.length > 0) {
+            try {
+              await newPage.context().addCookies(cookies);
+              console.log(`   ✅ Cookies copiados para nova página`);
+            } catch (cookieError) {
+              console.log(`   ⚠️  Aviso: Não foi possível copiar todos os cookies: ${cookieError.message.substring(0, 50)}`);
+            }
+          }
+          
+          // Aguardar um pouco antes de navegar
+          await this.humanDelay(1000, 2000);
+          
+          // Tentar navegar na nova página com referrer da página anterior
+          try {
+            // Primeiro, tentar com referrer e waitUntil
+            await newPage.goto(secondLoginUrl, { 
+              waitUntil: 'domcontentloaded',
+              timeout: 90000,
+              referer: currentUrl // Adicionar referrer para parecer navegação natural
+            });
+          } catch (e) {
+            // Se falhar, tentar sem waitUntil mas com referrer
+            try {
+              await newPage.goto(secondLoginUrl, { 
+                timeout: 90000,
+                referer: currentUrl
+              });
+            } catch (e2) {
+              // Se ainda falhar, tentar sem referrer (última tentativa)
+              await newPage.goto(secondLoginUrl, { 
+                timeout: 90000,
+                waitUntil: 'load'
+              });
+            }
+          }
+          
+          // Aguardar um pouco para garantir que a página carregou
+          await this.humanDelay(2000, 3000);
           
           // Verificar se a navegação foi bem-sucedida
           const newPageUrl = newPage.url();
@@ -1201,11 +1327,18 @@ class CanopusRPAService {
             this.page = newPage;
             navigationSuccess = true;
           } else {
+            console.log(`   ⚠️  URL não corresponde ao esperado: ${newPageUrl}`);
             // Fechar nova página e continuar
             await newPage.close().catch(() => {});
           }
         } catch (e) {
-          console.log(`⚠️  Estratégia 2 falhou: ${e.message.substring(0, 100)}`);
+          const errorMsg = e.message || String(e);
+          console.log(`⚠️  Estratégia 2 falhou: ${errorMsg.substring(0, 150)}`);
+          // Se for connection reset, logar mais detalhes
+          if (errorMsg.includes('ERR_CONNECTION_RESET') || errorMsg.includes('Connection Reset')) {
+            console.log(`   🔍 Detalhes: Erro de conexão resetada - pode ser bloqueio do servidor ou problema de rede`);
+            console.log(`   💡 Tentando estratégias alternativas...`);
+          }
         }
       }
       
