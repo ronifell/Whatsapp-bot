@@ -34,21 +34,7 @@ class CanopusRPAService {
 
       this.context = await this.browser.newContext({
         viewport: { width: 1920, height: 1080 },
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        locale: 'pt-BR',
-        timezoneId: 'America/Sao_Paulo',
-        extraHTTPHeaders: {
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-          'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-          'Accept-Encoding': 'gzip, deflate, br',
-          'Connection': 'keep-alive',
-          'Upgrade-Insecure-Requests': '1',
-          'Sec-Fetch-Dest': 'document',
-          'Sec-Fetch-Mode': 'navigate',
-          'Sec-Fetch-Site': 'same-origin',
-          'Sec-Fetch-User': '?1',
-          'Cache-Control': 'max-age=0'
-        }
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       });
 
       // Definir timeout padrão maior para operações (2 minutos)
@@ -83,79 +69,35 @@ class CanopusRPAService {
    */
   async navigateTo(url, options = {}) {
     const timeout = options.timeout || 120000; // Aumentado para 120 segundos
-    const maxRetries = options.maxRetries || 3;
-    const retryDelay = options.retryDelay || 5000;
     
-    // Se a URL é a segunda página de login, adicionar referer da primeira página
-    const referer = url.includes('afv.consorciocanopus.com.br') ? config.canopus.url : undefined;
-    
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      // Primeiro, tentar com 'load' (espera evento load do navegador)
+      await this.page.goto(url, { 
+        waitUntil: 'load',
+        timeout: timeout 
+      });
+      console.log(`✅ Navegação concluída: ${url}`);
+    } catch (error) {
+      // Se falhar, tentar com 'domcontentloaded' (mais rápido)
       try {
-        // Adicionar referer se necessário
-        if (referer && attempt === 1) {
-          await this.page.setExtraHTTPHeaders({
-            'Referer': referer
-          });
-        }
-        
-        // Primeiro, tentar com 'load' (espera evento load do navegador)
+        console.log(`⚠️  Tentando navegação alternativa para: ${url}`);
         await this.page.goto(url, { 
-          waitUntil: 'load',
+          waitUntil: 'domcontentloaded',
           timeout: timeout 
         });
-        console.log(`✅ Navegação concluída: ${url}`);
-        
-        // Aguardar um pouco para garantir que elementos dinâmicos carregaram
-        await this.page.waitForTimeout(2000);
-        return;
-      } catch (error) {
-        // Verificar se é erro de conexão resetada
-        const isConnectionReset = error.message.includes('ERR_CONNECTION_RESET') || 
-                                  error.message.includes('Connection reset') ||
-                                  error.message.includes('net::ERR_');
-        
-        if (isConnectionReset && attempt < maxRetries) {
-          console.log(`⚠️  Tentativa ${attempt}/${maxRetries} falhou (Connection Reset). Aguardando ${retryDelay/1000}s antes de tentar novamente...`);
-          await this.page.waitForTimeout(retryDelay);
-          continue;
-        }
-        
-        // Se falhar, tentar com 'domcontentloaded' (mais rápido)
-        try {
-          console.log(`⚠️  Tentando navegação alternativa para: ${url}`);
-          await this.page.goto(url, { 
-            waitUntil: 'domcontentloaded',
-            timeout: timeout 
-          });
-          console.log(`✅ Navegação concluída (domcontentloaded): ${url}`);
-          
-          // Aguardar um pouco para garantir que elementos dinâmicos carregaram
-          await this.page.waitForTimeout(2000);
-          return;
-        } catch (error2) {
-          // Se ainda falhar, tentar sem waitUntil (navega e continua)
-          try {
-            console.log(`⚠️  Navegação sem espera completa: ${url}`);
-            await this.page.goto(url, { 
-              timeout: timeout 
-            });
-            console.log(`✅ Navegação concluída (sem waitUntil): ${url}`);
-            
-            // Aguardar um pouco para garantir que elementos dinâmicos carregaram
-            await this.page.waitForTimeout(2000);
-            return;
-          } catch (error3) {
-            if (attempt === maxRetries) {
-              console.error(`❌ Falha ao navegar para ${url} após ${maxRetries} tentativas`);
-              throw error3;
-            }
-            // Continuar para próxima tentativa
-            console.log(`⚠️  Tentativa ${attempt}/${maxRetries} falhou. Aguardando ${retryDelay/1000}s...`);
-            await this.page.waitForTimeout(retryDelay);
-          }
-        }
+        console.log(`✅ Navegação concluída (domcontentloaded): ${url}`);
+      } catch (error2) {
+        // Se ainda falhar, tentar sem waitUntil (navega e continua)
+        console.log(`⚠️  Navegação sem espera completa: ${url}`);
+        await this.page.goto(url, { 
+          timeout: timeout 
+        });
+        console.log(`✅ Navegação concluída (sem waitUntil): ${url}`);
       }
     }
+    
+    // Aguardar um pouco para garantir que elementos dinâmicos carregaram
+    await this.page.waitForTimeout(2000);
   }
 
   /**
@@ -772,93 +714,12 @@ class CanopusRPAService {
     try {
       const secondLoginUrl = 'https://afv.consorciocanopus.com.br/Sistema/';
       
-      // Aguardar um pouco após o primeiro login antes de navegar para segunda página
-      console.log('⏳ Aguardando antes de navegar para segunda página...');
-      await this.page.waitForTimeout(5000);
-      
-      // Verificar e manter cookies da primeira sessão
-      const cookies = await this.context.cookies();
-      console.log(`🍪 Mantendo ${cookies.length} cookies da primeira sessão`);
-      
-      // Estratégia 1: Tentar encontrar um link/button na primeira página que leva à segunda
-      console.log('🔍 Procurando link ou botão para acessar o sistema AFV...');
-      let linkFound = false;
-      
-      try {
-        // Procurar por links que contenham "afv", "sistema", ou URLs relacionadas
-        const possibleLinks = await this.page.locator('a[href*="afv"], a[href*="Sistema"], a:has-text("AFV"), a:has-text("Sistema"), button[onclick*="afv"], button[onclick*="Sistema"]').all();
-        
-        if (possibleLinks.length > 0) {
-          console.log(`   Encontrados ${possibleLinks.length} possíveis links/botões`);
-          for (const link of possibleLinks) {
-            try {
-              if (await link.isVisible({ timeout: 2000 })) {
-                console.log('   Tentando clicar em link encontrado...');
-                await link.click();
-                await this.page.waitForTimeout(5000);
-                
-                // Verificar se a URL mudou para a segunda página
-                const currentUrl = this.page.url();
-                if (currentUrl.includes('afv.consorciocanopus.com.br') || currentUrl.includes('Sistema')) {
-                  console.log('✅ Acessado segunda página através de link!');
-                  linkFound = true;
-                  break;
-                }
-              }
-            } catch (e) {
-              // Continuar tentando outros links
-            }
-          }
-        }
-      } catch (e) {
-        console.log('   Nenhum link encontrado na primeira página');
-      }
-      
-      // Estratégia 2: Se não encontrou link, tentar navegação direta com nova página/tab
-      if (!linkFound) {
-        console.log('⚠️  Link não encontrado, tentando criar nova página no mesmo contexto...');
-        try {
-          // Criar nova página no mesmo contexto (mantém cookies)
-          const newPage = await this.context.newPage();
-          
-          // Adicionar referer
-          await newPage.setExtraHTTPHeaders({
-            'Referer': config.canopus.url
-          });
-          
-          // Fechar página antiga e usar a nova
-          await this.page.close();
-          this.page = newPage;
-          
-          console.log(`🔐 Navegando para segunda página de login: ${secondLoginUrl}`);
-          
-          // Tentar navegação com retries
-          await this.navigateTo(secondLoginUrl, {
-            maxRetries: 3,
-            retryDelay: 15000, // 15 segundos entre tentativas
-            timeout: 120000
-          });
-        } catch (e) {
-          // Se falhar, tentar na página original
-          console.log('⚠️  Nova página falhou, tentando na página original...');
-          await this.page.setExtraHTTPHeaders({
-            'Referer': config.canopus.url
-          });
-          
-          console.log(`🔐 Navegando para segunda página de login: ${secondLoginUrl}`);
-          
-          // Tentar navegação com retries
-          await this.navigateTo(secondLoginUrl, {
-            maxRetries: 3,
-            retryDelay: 15000,
-            timeout: 120000
-          });
-        }
-      }
+      console.log(`🔐 Navegando para segunda página de login: ${secondLoginUrl}`);
+      await this.navigateTo(secondLoginUrl);
       
       // Aguardar elementos carregarem
       console.log('⏳ Aguardando elementos da segunda página carregarem...');
-      await this.page.waitForTimeout(5000);
+      await this.page.waitForTimeout(3000);
       
       // Preencher campo de usuário (formulário HTML simples, não Angular)
       console.log('📝 Preenchendo campo de usuário...');
