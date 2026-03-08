@@ -225,42 +225,101 @@ class CanopusRPAService {
   }
 
   /**
-   * Navega para uma URL com estratégia de espera tolerante
-   * Tenta diferentes estratégias para evitar timeouts
+   * Navega para uma URL com estratégia de espera tolerante e retry para connection reset
+   * Tenta diferentes estratégias para evitar timeouts e connection resets
    */
   async navigateTo(url, options = {}) {
     const timeout = options.timeout || 120000; // Aumentado para 120 segundos
+    const maxRetries = options.maxRetries || 5; // Número máximo de tentativas
+    const retryDelay = options.retryDelay || 10000; // Delay entre tentativas (10 segundos)
     
-    try {
-      // Primeiro, tentar com 'load' (espera evento load do navegador)
-      await this.page.goto(url, { 
-        waitUntil: 'load',
-        timeout: timeout 
-      });
-      console.log(`✅ Navegação concluída: ${url}`);
-    } catch (error) {
-      // Se falhar, tentar com 'domcontentloaded' (mais rápido)
-      try {
-        console.log(`⚠️  Tentando navegação alternativa para: ${url}`);
-        await this.page.goto(url, { 
-          waitUntil: 'domcontentloaded',
-          timeout: timeout 
-        });
-        console.log(`✅ Navegação concluída (domcontentloaded): ${url}`);
-      } catch (error2) {
-        // Se ainda falhar, tentar sem waitUntil (navega e continua)
-        console.log(`⚠️  Navegação sem espera completa: ${url}`);
-        await this.page.goto(url, { 
-          timeout: timeout 
-        });
-        console.log(`✅ Navegação concluída (sem waitUntil): ${url}`);
+    let lastError = null;
+    
+    // Estratégias de navegação em ordem de preferência
+    const navigationStrategies = [
+      { waitUntil: 'load', name: 'load' },
+      { waitUntil: 'domcontentloaded', name: 'domcontentloaded' },
+      { waitUntil: 'networkidle', name: 'networkidle' },
+      { waitUntil: undefined, name: 'sem waitUntil' }
+    ];
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      for (const strategy of navigationStrategies) {
+        try {
+          if (attempt > 1) {
+            console.log(`🔄 Tentativa ${attempt}/${maxRetries} para: ${url} (estratégia: ${strategy.name})`);
+            // Delay exponencial entre tentativas
+            const delay = retryDelay * Math.pow(1.5, attempt - 2); // 10s, 15s, 22.5s, 33.75s...
+            console.log(`⏳ Aguardando ${Math.round(delay / 1000)}s antes de tentar novamente...`);
+            await this.humanDelay(delay, delay + 2000);
+            
+            // Simular comportamento humano: movimento de mouse
+            await this.simulateMouseMovement();
+          }
+          
+          // Tentar navegar com a estratégia atual
+          const gotoOptions = { timeout: timeout };
+          if (strategy.waitUntil) {
+            gotoOptions.waitUntil = strategy.waitUntil;
+          }
+          
+          await this.page.goto(url, gotoOptions);
+          console.log(`✅ Navegação concluída: ${url} (estratégia: ${strategy.name}, tentativa: ${attempt})`);
+          
+          // Aguardar um pouco para garantir que elementos dinâmicos carregaram
+          // Adicionar comportamento humano: pequeno movimento de mouse
+          await this.simulateMouseMovement();
+          await this.humanDelay(1000, 2000);
+          
+          return; // Sucesso, sair da função
+          
+        } catch (error) {
+          lastError = error;
+          
+          // Verificar se é um erro de connection reset
+          const isConnectionReset = error.message && (
+            error.message.includes('ERR_CONNECTION_RESET') ||
+            error.message.includes('Connection reset') ||
+            error.message.includes('net::ERR_CONNECTION_RESET')
+          );
+          
+          if (isConnectionReset) {
+            console.log(`⚠️  Tentativa ${attempt}/${maxRetries} falhou (Connection Reset). Estratégia: ${strategy.name}`);
+            
+            // Se é connection reset e ainda temos tentativas, continuar
+            if (attempt < maxRetries) {
+              // Tentar estratégia alternativa: criar nova página no mesmo contexto
+              if (attempt === Math.floor(maxRetries / 2)) {
+                console.log('🔄 Tentando estratégia alternativa: criando nova página no mesmo contexto...');
+                try {
+                  // Fechar página atual
+                  await this.page.close().catch(() => {});
+                  
+                  // Criar nova página no mesmo contexto (mantém cookies e sessão)
+                  this.page = await this.context.newPage();
+                  this.page.setDefaultTimeout(120000);
+                  
+                  console.log('✅ Nova página criada, tentando navegar novamente...');
+                  // Continuar para próxima tentativa
+                  break;
+                } catch (e) {
+                  console.log('⚠️  Não foi possível criar nova página, continuando com página atual...');
+                }
+              }
+              continue; // Tentar próxima estratégia ou próxima tentativa
+            }
+          } else {
+            // Se não é connection reset, tentar próxima estratégia
+            console.log(`⚠️  Estratégia ${strategy.name} falhou: ${error.message.substring(0, 100)}`);
+            continue; // Tentar próxima estratégia
+          }
+        }
       }
     }
     
-      // Aguardar um pouco para garantir que elementos dinâmicos carregaram
-      // Adicionar comportamento humano: pequeno movimento de mouse
-      await this.simulateMouseMovement();
-      await this.humanDelay(1000, 2000);
+    // Se chegou aqui, todas as tentativas falharam
+    console.error(`❌ Falha ao navegar para ${url} após ${maxRetries} tentativas`);
+    throw lastError || new Error(`Não foi possível navegar para ${url} após ${maxRetries} tentativas`);
   }
 
   /**
@@ -902,7 +961,117 @@ class CanopusRPAService {
       const secondLoginUrl = 'https://afv.consorciocanopus.com.br/Sistema/';
       
       console.log(`🔐 Navegando para segunda página de login: ${secondLoginUrl}`);
-      await this.navigateTo(secondLoginUrl);
+      
+      // Estratégia 1: Tentar encontrar e clicar em um link que leva para a segunda página
+      let navigationSuccess = false;
+      
+      try {
+        console.log('🔍 Estratégia 1: Procurando link para segunda página na página atual...');
+        
+        // Procurar links que possam levar para a segunda página
+        const linkSelectors = [
+          `a[href*="afv.consorciocanopus.com.br"]`,
+          `a[href*="Sistema"]`,
+          `a:has-text("Sistema")`,
+          `a:has-text("AFV")`,
+          `a[href*="/Sistema/"]`,
+          `button:has-text("Sistema")`,
+          `button:has-text("AFV")`
+        ];
+        
+        for (const selector of linkSelectors) {
+          try {
+            const links = await this.page.locator(selector).all();
+            for (const link of links) {
+              try {
+                if (await link.isVisible({ timeout: 2000 })) {
+                  const href = await link.getAttribute('href');
+                  if (href && (href.includes('afv.consorciocanopus.com.br') || href.includes('/Sistema/'))) {
+                    console.log(`✅ Link encontrado: ${href}`);
+                    
+                    // Mover mouse para o link antes de clicar
+                    const box = await link.boundingBox();
+                    if (box) {
+                      await this.page.mouse.move(
+                        box.x + box.width / 2 + (Math.random() - 0.5) * 5,
+                        box.y + box.height / 2 + (Math.random() - 0.5) * 5,
+                        { steps: 2 + Math.floor(Math.random() * 2) }
+                      );
+                      await this.humanDelay(100, 200);
+                    }
+                    
+                    // Clicar no link e aguardar navegação
+                    await Promise.all([
+                      this.page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {}),
+                      link.click()
+                    ]);
+                    
+                    await this.humanDelay(2000, 4000);
+                    
+                    // Verificar se navegou para a URL correta
+                    const currentUrl = this.page.url();
+                    if (currentUrl.includes('afv.consorciocanopus.com.br') || currentUrl.includes('/Sistema/')) {
+                      console.log(`✅ Navegação bem-sucedida via link! URL atual: ${currentUrl}`);
+                      navigationSuccess = true;
+                      break;
+                    }
+                  }
+                }
+              } catch (e) {
+                // Continuar procurando
+              }
+            }
+            if (navigationSuccess) break;
+          } catch (e) {
+            // Tentar próximo seletor
+          }
+        }
+      } catch (e) {
+        console.log('⚠️  Não foi possível encontrar link, tentando navegação direta...');
+      }
+      
+      // Estratégia 2: Tentar criar nova página no mesmo contexto e navegar
+      if (!navigationSuccess) {
+        try {
+          console.log('🔍 Estratégia 2: Criando nova página no mesmo contexto...');
+          const newPage = await this.context.newPage();
+          newPage.setDefaultTimeout(120000);
+          
+          // Tentar navegar na nova página
+          await newPage.goto(secondLoginUrl, { 
+            waitUntil: 'domcontentloaded',
+            timeout: 60000 
+          }).catch(async (e) => {
+            // Se falhar, tentar sem waitUntil
+            await newPage.goto(secondLoginUrl, { timeout: 60000 });
+          });
+          
+          // Verificar se a navegação foi bem-sucedida
+          const newPageUrl = newPage.url();
+          if (newPageUrl.includes('afv.consorciocanopus.com.br') || newPageUrl.includes('/Sistema/')) {
+            console.log(`✅ Navegação bem-sucedida na nova página! URL: ${newPageUrl}`);
+            // Fechar página antiga e usar a nova
+            await this.page.close().catch(() => {});
+            this.page = newPage;
+            navigationSuccess = true;
+          } else {
+            // Fechar nova página e continuar
+            await newPage.close().catch(() => {});
+          }
+        } catch (e) {
+          console.log(`⚠️  Estratégia 2 falhou: ${e.message.substring(0, 100)}`);
+        }
+      }
+      
+      // Estratégia 3: Navegação direta com retries (método navigateTo)
+      if (!navigationSuccess) {
+        console.log('🔍 Estratégia 3: Tentando navegação direta com retries...');
+        await this.navigateTo(secondLoginUrl, { 
+          maxRetries: 8, // Mais tentativas para a segunda página
+          retryDelay: 15000 // 15 segundos entre tentativas
+        });
+        navigationSuccess = true;
+      }
       
       // Aguardar elementos carregarem
       // Simular comportamento humano: movimento de mouse e scroll
