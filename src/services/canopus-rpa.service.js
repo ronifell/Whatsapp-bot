@@ -986,12 +986,21 @@ class CanopusRPAService {
             const buttons = await this.page.locator(selector).all();
             console.log(`   📊 Encontrados ${buttons.length} elementos com este seletor`);
             
+            // Filtrar apenas botões que contenham "AFV" no texto
             for (const button of buttons) {
               try {
                 if (await button.isVisible({ timeout: 3000 })) {
                   const text = await button.textContent() || '';
                   const className = await button.getAttribute('class') || '';
-                  console.log(`   ✅ Botão visível encontrado: texto="${text.substring(0, 50)}" class="${className}"`);
+                  
+                  // Verificar se o texto contém "AFV" (case insensitive)
+                  const textLower = text.toLowerCase().trim();
+                  if (!textLower.includes('afv')) {
+                    console.log(`   ⏭️  Pulando botão "${text}" - não contém "AFV"`);
+                    continue;
+                  }
+                  
+                  console.log(`   ✅ Botão AFV encontrado: texto="${text}" class="${className}"`);
                   
                   // Mover mouse para o botão antes de clicar (comportamento humano)
                   const box = await button.boundingBox();
@@ -1006,32 +1015,85 @@ class CanopusRPAService {
                   
                   // Clicar no botão e aguardar navegação
                   const initialUrl = this.page.url();
-                  console.log(`   🖱️  Clicando no botão... URL atual: ${initialUrl}`);
+                  console.log(`   🖱️  Clicando no botão AFV... URL atual: ${initialUrl}`);
+                  
+                  // Verificar se há um link pai que pode ser clicado
+                  let clickableElement = button;
+                  try {
+                    // Tentar encontrar um link pai (a tag) que contém este span
+                    const parentLink = await button.locator('xpath=ancestor::a').first();
+                    if (await parentLink.count() > 0) {
+                      clickableElement = parentLink;
+                      console.log('   📎 Encontrado link pai, clicando no link em vez do span');
+                    }
+                  } catch (e) {
+                    // Continuar com o span
+                  }
+                  
+                  // Aguardar por possíveis novas páginas/abas
+                  const pagePromise = this.context.waitForEvent('page', { timeout: 10000 }).catch(() => null);
                   
                   try {
                     await Promise.all([
                       this.page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {}),
-                      button.click({ timeout: 5000 })
+                      pagePromise,
+                      clickableElement.click({ timeout: 5000 })
                     ]);
                   } catch (clickError) {
                     // Se falhar, tentar JavaScript click
                     console.log('   ⚠️  Click normal falhou, tentando JavaScript click...');
-                    await button.evaluate(el => el.click());
+                    await clickableElement.evaluate(el => {
+                      // Tentar clicar no elemento ou no link pai
+                      if (el.tagName === 'A') {
+                        el.click();
+                      } else {
+                        const link = el.closest('a');
+                        if (link) {
+                          link.click();
+                        } else {
+                          el.click();
+                        }
+                      }
+                    });
                     await this.humanDelay(2000, 4000);
                   }
                   
-                  await this.humanDelay(2000, 4000);
+                  // Verificar se uma nova página foi aberta
+                  const newPage = await pagePromise;
+                  if (newPage) {
+                    console.log('   🆕 Nova página/aba detectada!');
+                    // Fechar página antiga e usar a nova
+                    await this.page.close().catch(() => {});
+                    this.page = newPage;
+                    await this.page.setDefaultTimeout(120000);
+                    await this.humanDelay(2000, 4000);
+                  } else {
+                    await this.humanDelay(2000, 4000);
+                  }
                   
                   // Verificar se navegou para a URL correta
                   const currentUrl = this.page.url();
                   console.log(`   📍 URL após clique: ${currentUrl}`);
                   
-                  if (currentUrl.includes('afv.consorciocanopus.com.br') || 
-                      currentUrl.includes('/Sistema/') ||
-                      currentUrl !== initialUrl) {
-                    console.log(`✅ Navegação bem-sucedida via botão! URL atual: ${currentUrl}`);
+                  // Verificar se estamos no domínio AFV
+                  if (currentUrl.includes('afv.consorciocanopus.com.br')) {
+                    console.log(`✅ Navegação bem-sucedida para AFV! URL atual: ${currentUrl}`);
                     navigationSuccess = true;
                     break;
+                  } else if (currentUrl !== initialUrl && currentUrl.includes('consorciocanopus.com.br')) {
+                    // Se mudou de URL mas ainda não está no AFV, pode estar em uma página intermediária
+                    console.log(`   ⚠️  URL mudou mas ainda não está no AFV. Aguardando mais...`);
+                    await this.humanDelay(3000, 5000);
+                    
+                    // Verificar novamente
+                    const finalUrl = this.page.url();
+                    if (finalUrl.includes('afv.consorciocanopus.com.br')) {
+                      console.log(`✅ Navegação bem-sucedida para AFV após espera! URL: ${finalUrl}`);
+                      navigationSuccess = true;
+                      break;
+                    } else {
+                      console.log(`   ⚠️  Ainda não está no AFV. URL atual: ${finalUrl}`);
+                    }
                   } else {
                     console.log(`   ⚠️  URL não mudou ou não é a página esperada. Tentando próximo elemento...`);
                   }
