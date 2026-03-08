@@ -1039,21 +1039,35 @@ class CanopusRPAService {
                   
                   // Tentar extrair URL real do link antes de clicar
                   let extractedUrl = null;
+                  let linkTarget = null;
+                  let hasOnClick = false;
                   try {
                     // Tentar encontrar um link pai (a tag) que contém este span
                     const parentLink = await button.locator('xpath=ancestor::a').first();
                     if (await parentLink.count() > 0) {
                       extractedUrl = await parentLink.getAttribute('href');
+                      linkTarget = await parentLink.getAttribute('target');
+                      
+                      // Verificar se o link usa JavaScript
+                      hasOnClick = await parentLink.evaluate(el => {
+                        return el.onclick !== null || el.getAttribute('onclick') !== null || 
+                               (el.href && el.href.startsWith('javascript:'));
+                      });
+                      
                       if (extractedUrl) {
                         // Se for URL relativa, converter para absoluta
                         if (extractedUrl.startsWith('/')) {
                           const baseUrl = new URL(this.page.url()).origin;
                           extractedUrl = baseUrl + extractedUrl;
-                        } else if (!extractedUrl.startsWith('http')) {
+                        } else if (!extractedUrl.startsWith('http') && !extractedUrl.startsWith('javascript:')) {
                           const baseUrl = new URL(this.page.url()).origin;
                           extractedUrl = baseUrl + '/' + extractedUrl;
                         }
                         console.log(`   🔗 URL extraída do link: ${extractedUrl}`);
+                        console.log(`   🎯 Target do link: ${linkTarget || 'mesma página'}`);
+                        if (hasOnClick) {
+                          console.log(`   ⚠️  Link usa JavaScript para navegar`);
+                        }
                       }
                     }
                   } catch (e) {
@@ -1093,8 +1107,42 @@ class CanopusRPAService {
                     console.log(`   💡 URL extraída aponta para AFV, será usada como fallback se o clique falhar`);
                   }
                   
-                  // Aguardar por possíveis novas páginas/abas
-                  const pagePromise = this.context.waitForEvent('page', { timeout: 10000 }).catch(() => null);
+                  // Se o link usa JavaScript, tentar executar antes do clique normal
+                  if (hasOnClick && extractedUrl && extractedUrl.includes('afv.consorciocanopus.com.br')) {
+                    try {
+                      console.log('   🔧 Link usa JavaScript, tentando executar onclick...');
+                      const parentLink = await button.locator('xpath=ancestor::a').first();
+                      if (await parentLink.count() > 0) {
+                        await parentLink.evaluate(el => {
+                          // Tentar executar onclick se existir
+                          if (el.onclick) {
+                            el.onclick();
+                          } else if (el.getAttribute('onclick')) {
+                            eval(el.getAttribute('onclick'));
+                          }
+                          // Se não funcionar e tiver href válido, usar window.location
+                          if (el.href && !el.href.startsWith('javascript:')) {
+                            window.location.href = el.href;
+                          }
+                        });
+                        await this.humanDelay(3000, 5000);
+                        
+                        // Verificar se navegou
+                        const jsNavUrl = this.page.url();
+                        if (jsNavUrl.includes('afv.consorciocanopus.com.br')) {
+                          console.log(`✅ Navegação via JavaScript bem-sucedida! URL: ${jsNavUrl}`);
+                          navigationSuccess = true;
+                          break;
+                        }
+                      }
+                    } catch (jsError) {
+                      console.log(`   ⚠️  Navegação JavaScript falhou: ${jsError.message.substring(0, 50)}`);
+                    }
+                  }
+                  
+                  // Aguardar por possíveis novas páginas/abas (aumentar timeout para links com target="_blank")
+                  const pageTimeout = linkTarget === '_blank' ? 15000 : 10000;
+                  const pagePromise = this.context.waitForEvent('page', { timeout: pageTimeout }).catch(() => null);
                   
                   try {
                     await Promise.all([
@@ -1163,7 +1211,31 @@ class CanopusRPAService {
                     // Se temos uma URL extraída e o clique não funcionou, tentar navegação direta
                     if (extractedUrl && extractedUrl.includes('afv.consorciocanopus.com.br')) {
                       console.log(`   🔄 Tentando navegação direta com URL extraída...`);
+                      
+                      // Primeiro, tentar usar window.location.href (mais natural, mantém sessão)
                       try {
+                        console.log(`   🔧 Tentando window.location.href...`);
+                        const navSuccess = await this.page.evaluate((url) => {
+                          window.location.href = url;
+                          return true;
+                        }, extractedUrl);
+                        
+                        if (navSuccess) {
+                          await this.humanDelay(3000, 5000);
+                          const jsNavUrl = this.page.url();
+                          if (jsNavUrl.includes('afv.consorciocanopus.com.br')) {
+                            console.log(`   ✅ Navegação via window.location bem-sucedida! URL: ${jsNavUrl}`);
+                            navigationSuccess = true;
+                            break;
+                          }
+                        }
+                      } catch (jsNavError) {
+                        console.log(`   ⚠️  Navegação JavaScript falhou: ${jsNavError.message.substring(0, 50)}`);
+                      }
+                      
+                      // Se JavaScript não funcionou, tentar page.goto com mais opções
+                      try {
+                        console.log(`   🔄 Tentando page.goto com URL extraída...`);
                         await this.page.goto(extractedUrl, {
                           waitUntil: 'domcontentloaded',
                           timeout: 60000,
@@ -1177,7 +1249,30 @@ class CanopusRPAService {
                           break;
                         }
                       } catch (directNavError) {
-                        console.log(`   ⚠️  Navegação direta também falhou: ${directNavError.message.substring(0, 50)}`);
+                        const errorMsg = directNavError.message || String(directNavError);
+                        console.log(`   ⚠️  Navegação direta também falhou: ${errorMsg.substring(0, 100)}`);
+                        
+                        // Se for connection reset, tentar uma última vez com timeout maior
+                        if (errorMsg.includes('ERR_CONNECTION_RESET') || errorMsg.includes('Connection Reset')) {
+                          console.log(`   🔄 Tentando novamente com timeout maior devido a connection reset...`);
+                          try {
+                            await this.humanDelay(5000, 8000);
+                            await this.page.goto(extractedUrl, {
+                              waitUntil: 'load',
+                              timeout: 90000,
+                              referer: initialUrl
+                            });
+                            await this.humanDelay(3000, 5000);
+                            const retryNavUrl = this.page.url();
+                            if (retryNavUrl.includes('afv.consorciocanopus.com.br')) {
+                              console.log(`   ✅ Navegação após retry bem-sucedida! URL: ${retryNavUrl}`);
+                              navigationSuccess = true;
+                              break;
+                            }
+                          } catch (retryError) {
+                            console.log(`   ❌ Retry também falhou: ${retryError.message.substring(0, 50)}`);
+                          }
+                        }
                       }
                     }
                   }
@@ -1291,45 +1386,95 @@ class CanopusRPAService {
           // Aguardar um pouco antes de navegar
           await this.humanDelay(1000, 2000);
           
-          // Tentar navegar na nova página com referrer da página anterior
+          // Primeiro, tentar usar window.location.href (mais natural, mantém sessão melhor)
+          let navigationWorked = false;
           try {
-            // Primeiro, tentar com referrer e waitUntil
-            await newPage.goto(secondLoginUrl, { 
-              waitUntil: 'domcontentloaded',
-              timeout: 90000,
-              referer: currentUrl // Adicionar referrer para parecer navegação natural
-            });
-          } catch (e) {
-            // Se falhar, tentar sem waitUntil mas com referrer
-            try {
-              await newPage.goto(secondLoginUrl, { 
-                timeout: 90000,
-                referer: currentUrl
-              });
-            } catch (e2) {
-              // Se ainda falhar, tentar sem referrer (última tentativa)
-              await newPage.goto(secondLoginUrl, { 
-                timeout: 90000,
-                waitUntil: 'load'
-              });
+            console.log(`   🔧 Tentando window.location.href na nova página...`);
+            await newPage.goto('about:blank'); // Navegar para página em branco primeiro
+            await this.humanDelay(500, 1000);
+            
+            const jsNavSuccess = await newPage.evaluate((url) => {
+              window.location.href = url;
+              return true;
+            }, secondLoginUrl);
+            
+            if (jsNavSuccess) {
+              await this.humanDelay(3000, 5000);
+              const jsNavUrl = newPage.url();
+              if (jsNavUrl.includes('afv.consorciocanopus.com.br') || jsNavUrl.includes('/Sistema/')) {
+                console.log(`   ✅ Navegação via window.location bem-sucedida! URL: ${jsNavUrl}`);
+                await this.page.close().catch(() => {});
+                this.page = newPage;
+                navigationSuccess = true;
+                navigationWorked = true;
+              }
             }
+          } catch (jsError) {
+            console.log(`   ⚠️  Navegação JavaScript falhou: ${jsError.message.substring(0, 50)}`);
           }
           
-          // Aguardar um pouco para garantir que a página carregou
-          await this.humanDelay(2000, 3000);
-          
-          // Verificar se a navegação foi bem-sucedida
-          const newPageUrl = newPage.url();
-          if (newPageUrl.includes('afv.consorciocanopus.com.br') || newPageUrl.includes('/Sistema/')) {
-            console.log(`✅ Navegação bem-sucedida na nova página! URL: ${newPageUrl}`);
-            // Fechar página antiga e usar a nova
-            await this.page.close().catch(() => {});
-            this.page = newPage;
-            navigationSuccess = true;
-          } else {
-            console.log(`   ⚠️  URL não corresponde ao esperado: ${newPageUrl}`);
-            // Fechar nova página e continuar
-            await newPage.close().catch(() => {});
+          // Se JavaScript não funcionou, tentar page.goto
+          if (!navigationWorked) {
+            try {
+              console.log(`   🔄 Tentando page.goto na nova página...`);
+              // Primeiro, tentar com referrer e waitUntil
+              await newPage.goto(secondLoginUrl, { 
+                waitUntil: 'domcontentloaded',
+                timeout: 90000,
+                referer: currentUrl // Adicionar referrer para parecer navegação natural
+              });
+            } catch (e) {
+              // Se falhar, tentar sem waitUntil mas com referrer
+              try {
+                await newPage.goto(secondLoginUrl, { 
+                  timeout: 90000,
+                  referer: currentUrl
+                });
+              } catch (e2) {
+                // Se ainda falhar, tentar sem referrer (última tentativa)
+                try {
+                  await newPage.goto(secondLoginUrl, { 
+                    timeout: 90000,
+                    waitUntil: 'load'
+                  });
+                } catch (e3) {
+                  // Se tudo falhar, tentar uma última vez com timeout maior após delay
+                  const errorMsg = e3.message || String(e3);
+                  if (errorMsg.includes('ERR_CONNECTION_RESET') || errorMsg.includes('Connection Reset')) {
+                    console.log(`   🔄 Connection reset detectado, aguardando antes de retry...`);
+                    await this.humanDelay(5000, 8000);
+                    try {
+                      await newPage.goto(secondLoginUrl, {
+                        waitUntil: 'load',
+                        timeout: 120000,
+                        referer: currentUrl
+                      });
+                    } catch (finalError) {
+                      throw finalError; // Re-throw para ser capturado pelo catch externo
+                    }
+                  } else {
+                    throw e3;
+                  }
+                }
+              }
+            }
+            
+            // Aguardar um pouco para garantir que a página carregou
+            await this.humanDelay(2000, 3000);
+            
+            // Verificar se a navegação foi bem-sucedida
+            const newPageUrl = newPage.url();
+            if (newPageUrl.includes('afv.consorciocanopus.com.br') || newPageUrl.includes('/Sistema/')) {
+              console.log(`✅ Navegação bem-sucedida na nova página! URL: ${newPageUrl}`);
+              // Fechar página antiga e usar a nova
+              await this.page.close().catch(() => {});
+              this.page = newPage;
+              navigationSuccess = true;
+            } else {
+              console.log(`   ⚠️  URL não corresponde ao esperado: ${newPageUrl}`);
+              // Fechar nova página e continuar
+              await newPage.close().catch(() => {});
+            }
           }
         } catch (e) {
           const errorMsg = e.message || String(e);
