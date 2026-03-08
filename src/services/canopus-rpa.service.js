@@ -1048,11 +1048,27 @@ class CanopusRPAService {
                       extractedUrl = await parentLink.getAttribute('href');
                       linkTarget = await parentLink.getAttribute('target');
                       
+                      console.log(`   🔍 Debug: href extraído = ${extractedUrl || 'null'}`);
+                      
                       // Verificar se o link usa JavaScript
                       hasOnClick = await parentLink.evaluate(el => {
                         return el.onclick !== null || el.getAttribute('onclick') !== null || 
                                (el.href && el.href.startsWith('javascript:'));
                       });
+                      
+                      // Se não tem href, tentar extrair de data attributes ou outros lugares
+                      if (!extractedUrl) {
+                        extractedUrl = await parentLink.evaluate(el => {
+                          // Tentar data-href, data-url, ou onclick que contenha URL
+                          return el.getAttribute('data-href') || 
+                                 el.getAttribute('data-url') ||
+                                 (el.getAttribute('onclick') && el.getAttribute('onclick').match(/['"](https?:\/\/[^'"]+)['"]/)?.[1]) ||
+                                 null;
+                        });
+                        if (extractedUrl) {
+                          console.log(`   🔍 URL extraída de data attribute: ${extractedUrl}`);
+                        }
+                      }
                       
                       if (extractedUrl) {
                         // Se for URL relativa, converter para absoluta
@@ -1068,10 +1084,21 @@ class CanopusRPAService {
                         if (hasOnClick) {
                           console.log(`   ⚠️  Link usa JavaScript para navegar`);
                         }
+                      } else {
+                        console.log(`   ⚠️  Não foi possível extrair URL do link - pode usar JavaScript puro`);
+                        // Se não conseguiu extrair URL, usar URL hardcoded como fallback
+                        extractedUrl = 'https://afv.consorciocanopus.com.br/Sistema/';
+                        console.log(`   💡 Usando URL hardcoded como fallback: ${extractedUrl}`);
                       }
+                    } else {
+                      console.log(`   ⚠️  Não foi encontrado link pai - usando URL hardcoded`);
+                      extractedUrl = 'https://afv.consorciocanopus.com.br/Sistema/';
                     }
                   } catch (e) {
-                    // Continuar sem URL extraída
+                    console.log(`   ⚠️  Erro ao extrair URL: ${e.message.substring(0, 50)}`);
+                    // Usar URL hardcoded como fallback
+                    extractedUrl = 'https://afv.consorciocanopus.com.br/Sistema/';
+                    console.log(`   💡 Usando URL hardcoded como fallback: ${extractedUrl}`);
                   }
                   
                   // Mover mouse para o botão antes de clicar (comportamento humano)
@@ -1206,31 +1233,43 @@ class CanopusRPAService {
                       console.log(`   ⚠️  Ainda não está no AFV. URL atual: ${finalUrl}`);
                     }
                   } else {
-                    console.log(`   ⚠️  URL não mudou ou não é a página esperada. Tentando próximo elemento...`);
+                    console.log(`   ⚠️  URL não mudou ou não é a página esperada. Tentando navegação direta...`);
                     
                     // Se temos uma URL extraída e o clique não funcionou, tentar navegação direta
                     if (extractedUrl && extractedUrl.includes('afv.consorciocanopus.com.br')) {
-                      console.log(`   🔄 Tentando navegação direta com URL extraída...`);
+                      console.log(`   🔄 Tentando navegação direta com URL: ${extractedUrl}`);
                       
-                      // Primeiro, tentar usar window.location.href (mais natural, mantém sessão)
+                      // Primeiro, tentar usar window.location.href na página ATUAL (mais natural, mantém sessão)
                       try {
-                        console.log(`   🔧 Tentando window.location.href...`);
-                        const navSuccess = await this.page.evaluate((url) => {
+                        console.log(`   🔧 Tentando window.location.href na página atual...`);
+                        await this.page.evaluate((url) => {
                           window.location.href = url;
-                          return true;
                         }, extractedUrl);
                         
-                        if (navSuccess) {
-                          await this.humanDelay(3000, 5000);
-                          const jsNavUrl = this.page.url();
-                          if (jsNavUrl.includes('afv.consorciocanopus.com.br')) {
-                            console.log(`   ✅ Navegação via window.location bem-sucedida! URL: ${jsNavUrl}`);
+                        // Aguardar navegação acontecer
+                        await this.humanDelay(3000, 5000);
+                        
+                        // Verificar se navegou
+                        const jsNavUrl = this.page.url();
+                        console.log(`   📍 URL após window.location.href: ${jsNavUrl}`);
+                        
+                        if (jsNavUrl.includes('afv.consorciocanopus.com.br')) {
+                          console.log(`   ✅ Navegação via window.location bem-sucedida! URL: ${jsNavUrl}`);
+                          navigationSuccess = true;
+                          break;
+                        } else {
+                          console.log(`   ⚠️  window.location.href não mudou para AFV, tentando aguardar mais...`);
+                          // Aguardar mais um pouco - pode estar carregando
+                          await this.humanDelay(5000, 8000);
+                          const finalUrl = this.page.url();
+                          if (finalUrl.includes('afv.consorciocanopus.com.br')) {
+                            console.log(`   ✅ Navegação bem-sucedida após espera adicional! URL: ${finalUrl}`);
                             navigationSuccess = true;
                             break;
                           }
                         }
                       } catch (jsNavError) {
-                        console.log(`   ⚠️  Navegação JavaScript falhou: ${jsNavError.message.substring(0, 50)}`);
+                        console.log(`   ⚠️  Navegação JavaScript falhou: ${jsNavError.message.substring(0, 100)}`);
                       }
                       
                       // Se JavaScript não funcionou, tentar page.goto com mais opções
@@ -1353,6 +1392,50 @@ class CanopusRPAService {
         }
       } catch (e) {
         console.log(`⚠️  Estratégia 1 falhou: ${e.message.substring(0, 100)}`);
+      }
+      
+      // Estratégia 1.5: Tentar window.location.href na página atual ANTES de criar nova página
+      // Isso pode funcionar melhor porque mantém a sessão e cookies da página atual
+      if (!navigationSuccess) {
+        try {
+          console.log('🔍 Estratégia 1.5: Tentando window.location.href na página atual...');
+          const currentUrl = this.page.url();
+          const targetUrl = 'https://afv.consorciocanopus.com.br/Sistema/';
+          
+          console.log(`   🔧 Navegando de ${currentUrl} para ${targetUrl} usando window.location.href...`);
+          
+          await this.page.evaluate((url) => {
+            window.location.href = url;
+          }, targetUrl);
+          
+          // Aguardar navegação acontecer
+          await this.humanDelay(3000, 5000);
+          
+          // Verificar se navegou
+          let newUrl = this.page.url();
+          console.log(`   📍 URL após window.location.href: ${newUrl}`);
+          
+          if (newUrl.includes('afv.consorciocanopus.com.br')) {
+            console.log(`✅ Navegação via window.location.href bem-sucedida! URL: ${newUrl}`);
+            navigationSuccess = true;
+          } else {
+            // Aguardar mais um pouco - pode estar carregando ou redirecionando
+            console.log(`   ⏳ Aguardando mais tempo para navegação completar...`);
+            await this.humanDelay(5000, 8000);
+            newUrl = this.page.url();
+            console.log(`   📍 URL após espera adicional: ${newUrl}`);
+            
+            if (newUrl.includes('afv.consorciocanopus.com.br')) {
+              console.log(`✅ Navegação bem-sucedida após espera! URL: ${newUrl}`);
+              navigationSuccess = true;
+            } else {
+              console.log(`   ⚠️  window.location.href não funcionou, URL ainda: ${newUrl}`);
+            }
+          }
+        } catch (e) {
+          const errorMsg = e.message || String(e);
+          console.log(`⚠️  Estratégia 1.5 falhou: ${errorMsg.substring(0, 100)}`);
+        }
       }
       
       // Estratégia 2: Tentar criar nova página no mesmo contexto e navegar
