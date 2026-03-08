@@ -962,72 +962,156 @@ class CanopusRPAService {
       
       console.log(`🔐 Navegando para segunda página de login: ${secondLoginUrl}`);
       
-      // Estratégia 1: Tentar encontrar e clicar em um link que leva para a segunda página
+      // Estratégia 1: Tentar encontrar e clicar no botão específico que leva para a segunda página
       let navigationSuccess = false;
       
       try {
-        console.log('🔍 Estratégia 1: Procurando link para segunda página na página atual...');
+        console.log('🔍 Estratégia 1: Procurando botão span.nav-link-title.ng-star-inserted...');
         
-        // Procurar links que possam levar para a segunda página
-        const linkSelectors = [
-          `a[href*="afv.consorciocanopus.com.br"]`,
-          `a[href*="Sistema"]`,
-          `a:has-text("Sistema")`,
-          `a:has-text("AFV")`,
-          `a[href*="/Sistema/"]`,
-          `button:has-text("Sistema")`,
-          `button:has-text("AFV")`
+        // Aguardar página carregar completamente antes de procurar
+        await this.humanDelay(2000, 3000);
+        await this.simulateMouseMovement();
+        
+        // Primeiro, tentar o seletor específico fornecido pelo usuário
+        const specificButtonSelectors = [
+          'span.nav-link-title.ng-star-inserted',
+          'span[class*="nav-link-title"][class*="ng-star-inserted"]',
+          '.nav-link-title.ng-star-inserted',
+          'span.nav-link-title'
         ];
         
-        for (const selector of linkSelectors) {
+        for (const selector of specificButtonSelectors) {
           try {
-            const links = await this.page.locator(selector).all();
-            for (const link of links) {
+            console.log(`   🔍 Tentando seletor: ${selector}`);
+            const buttons = await this.page.locator(selector).all();
+            console.log(`   📊 Encontrados ${buttons.length} elementos com este seletor`);
+            
+            for (const button of buttons) {
               try {
-                if (await link.isVisible({ timeout: 2000 })) {
-                  const href = await link.getAttribute('href');
-                  if (href && (href.includes('afv.consorciocanopus.com.br') || href.includes('/Sistema/'))) {
-                    console.log(`✅ Link encontrado: ${href}`);
-                    
-                    // Mover mouse para o link antes de clicar
-                    const box = await link.boundingBox();
-                    if (box) {
-                      await this.page.mouse.move(
-                        box.x + box.width / 2 + (Math.random() - 0.5) * 5,
-                        box.y + box.height / 2 + (Math.random() - 0.5) * 5,
-                        { steps: 2 + Math.floor(Math.random() * 2) }
-                      );
-                      await this.humanDelay(100, 200);
-                    }
-                    
-                    // Clicar no link e aguardar navegação
+                if (await button.isVisible({ timeout: 3000 })) {
+                  const text = await button.textContent() || '';
+                  const className = await button.getAttribute('class') || '';
+                  console.log(`   ✅ Botão visível encontrado: texto="${text.substring(0, 50)}" class="${className}"`);
+                  
+                  // Mover mouse para o botão antes de clicar (comportamento humano)
+                  const box = await button.boundingBox();
+                  if (box) {
+                    await this.page.mouse.move(
+                      box.x + box.width / 2 + (Math.random() - 0.5) * 5,
+                      box.y + box.height / 2 + (Math.random() - 0.5) * 5,
+                      { steps: 2 + Math.floor(Math.random() * 2) }
+                    );
+                    await this.humanDelay(100, 200);
+                  }
+                  
+                  // Clicar no botão e aguardar navegação
+                  const initialUrl = this.page.url();
+                  console.log(`   🖱️  Clicando no botão... URL atual: ${initialUrl}`);
+                  
+                  try {
                     await Promise.all([
                       this.page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {}),
-                      link.click()
+                      button.click({ timeout: 5000 })
                     ]);
-                    
+                  } catch (clickError) {
+                    // Se falhar, tentar JavaScript click
+                    console.log('   ⚠️  Click normal falhou, tentando JavaScript click...');
+                    await button.evaluate(el => el.click());
                     await this.humanDelay(2000, 4000);
-                    
-                    // Verificar se navegou para a URL correta
-                    const currentUrl = this.page.url();
-                    if (currentUrl.includes('afv.consorciocanopus.com.br') || currentUrl.includes('/Sistema/')) {
-                      console.log(`✅ Navegação bem-sucedida via link! URL atual: ${currentUrl}`);
-                      navigationSuccess = true;
-                      break;
-                    }
+                  }
+                  
+                  await this.humanDelay(2000, 4000);
+                  
+                  // Verificar se navegou para a URL correta
+                  const currentUrl = this.page.url();
+                  console.log(`   📍 URL após clique: ${currentUrl}`);
+                  
+                  if (currentUrl.includes('afv.consorciocanopus.com.br') || 
+                      currentUrl.includes('/Sistema/') ||
+                      currentUrl !== initialUrl) {
+                    console.log(`✅ Navegação bem-sucedida via botão! URL atual: ${currentUrl}`);
+                    navigationSuccess = true;
+                    break;
+                  } else {
+                    console.log(`   ⚠️  URL não mudou ou não é a página esperada. Tentando próximo elemento...`);
                   }
                 }
               } catch (e) {
+                console.log(`   ⚠️  Erro ao processar botão: ${e.message.substring(0, 50)}`);
                 // Continuar procurando
               }
             }
             if (navigationSuccess) break;
           } catch (e) {
+            console.log(`   ⚠️  Erro com seletor ${selector}: ${e.message.substring(0, 50)}`);
             // Tentar próximo seletor
           }
         }
+        
+        // Se não encontrou com o seletor específico, tentar seletores alternativos
+        if (!navigationSuccess) {
+          console.log('🔍 Estratégia 1b: Procurando links alternativos...');
+          
+          const linkSelectors = [
+            `a[href*="afv.consorciocanopus.com.br"]`,
+            `a[href*="Sistema"]`,
+            `a:has-text("Sistema")`,
+            `a:has-text("AFV")`,
+            `a[href*="/Sistema/"]`,
+            `button:has-text("Sistema")`,
+            `button:has-text("AFV")`
+          ];
+          
+          for (const selector of linkSelectors) {
+            try {
+              const links = await this.page.locator(selector).all();
+              for (const link of links) {
+                try {
+                  if (await link.isVisible({ timeout: 2000 })) {
+                    const href = await link.getAttribute('href');
+                    if (href && (href.includes('afv.consorciocanopus.com.br') || href.includes('/Sistema/'))) {
+                      console.log(`✅ Link encontrado: ${href}`);
+                      
+                      // Mover mouse para o link antes de clicar
+                      const box = await link.boundingBox();
+                      if (box) {
+                        await this.page.mouse.move(
+                          box.x + box.width / 2 + (Math.random() - 0.5) * 5,
+                          box.y + box.height / 2 + (Math.random() - 0.5) * 5,
+                          { steps: 2 + Math.floor(Math.random() * 2) }
+                        );
+                        await this.humanDelay(100, 200);
+                      }
+                      
+                      // Clicar no link e aguardar navegação
+                      await Promise.all([
+                        this.page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {}),
+                        link.click()
+                      ]);
+                      
+                      await this.humanDelay(2000, 4000);
+                      
+                      // Verificar se navegou para a URL correta
+                      const currentUrl = this.page.url();
+                      if (currentUrl.includes('afv.consorciocanopus.com.br') || currentUrl.includes('/Sistema/')) {
+                        console.log(`✅ Navegação bem-sucedida via link! URL atual: ${currentUrl}`);
+                        navigationSuccess = true;
+                        break;
+                      }
+                    }
+                  }
+                } catch (e) {
+                  // Continuar procurando
+                }
+              }
+              if (navigationSuccess) break;
+            } catch (e) {
+              // Tentar próximo seletor
+            }
+          }
+        }
       } catch (e) {
-        console.log('⚠️  Não foi possível encontrar link, tentando navegação direta...');
+        console.log(`⚠️  Estratégia 1 falhou: ${e.message.substring(0, 100)}`);
       }
       
       // Estratégia 2: Tentar criar nova página no mesmo contexto e navegar
