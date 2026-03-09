@@ -2,6 +2,7 @@ import { chromium } from 'playwright';
 import { config } from '../config/config.js';
 import fs from 'fs';
 import path from 'path';
+import axios from 'axios';
 
 /**
  * Serviço de RPA para automação do portal Canopus
@@ -13,6 +14,8 @@ class CanopusRPAService {
     this.page = null;
     this.isLoggedIn = false;
     this.currentUserAgent = null;
+    this.currentProxy = null;
+    this.workingProxies = [];
   }
 
   /**
@@ -73,7 +76,332 @@ class CanopusRPAService {
    */
   async humanDelay(min = 500, max = 2000) {
     const delay = min + Math.random() * (max - min);
-    await this.page.waitForTimeout(delay);
+    if (this.page) {
+      await this.page.waitForTimeout(delay);
+    } else {
+      // Se não tem página, usar setTimeout
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+
+  /**
+   * Simula leitura da página (scroll e pausas)
+   */
+  async simulatePageReading() {
+    try {
+      if (!this.page) return;
+      
+      // Scroll lento pela página
+      const viewport = this.page.viewportSize();
+      if (viewport) {
+        for (let i = 0; i < 3; i++) {
+          await this.page.mouse.wheel(0, 200);
+          await this.humanDelay(1000, 2000);
+        }
+      }
+      
+      // Movimento aleatório do mouse
+      await this.simulateMouseMovement();
+      
+      // Pequena pausa como se estivesse lendo
+      await this.humanDelay(2000, 4000);
+    } catch (error) {
+      // Ignorar erros
+    }
+  }
+
+  /**
+   * Busca proxies gratuitos de fontes públicas
+   * Prioriza proxies do Brasil com características ideais
+   */
+  async fetchFreeProxies() {
+    try {
+      console.log('🔍 Buscando proxies gratuitos (priorizando Brasil, Elite, HTTPS)...');
+      
+      const proxies = [];
+      
+      // Fonte 1: ProxyScrape - Buscar proxies do Brasil especificamente
+      try {
+        // Primeiro, tentar buscar proxies do Brasil (BR)
+        const responseBR = await axios.get('https://api.proxyscrape.com/v2/?request=get&protocol=http&timeout=10000&country=BR&ssl=all&anonymity=all', {
+          timeout: 10000
+        });
+        
+        const linesBR = responseBR.data.split('\n').filter(line => line.trim());
+        for (const line of linesBR) {
+          const [host, port] = line.trim().split(':');
+          if (host && port && !isNaN(parseInt(port))) {
+            proxies.push({ 
+              host, 
+              port: parseInt(port), 
+              source: 'proxyscrape',
+              country: 'BR',
+              priority: 10 // Alta prioridade para proxies do Brasil
+            });
+          }
+        }
+        console.log(`   📋 ProxyScrape BR: ${linesBR.length} proxies do Brasil encontrados`);
+        
+        // Se não encontrou muitos do Brasil, buscar de outros países também
+        if (linesBR.length < 10) {
+          const responseAll = await axios.get('https://api.proxyscrape.com/v2/?request=get&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all', {
+            timeout: 10000
+          });
+          
+          const linesAll = responseAll.data.split('\n').filter(line => line.trim());
+          for (const line of linesAll.slice(0, 30)) {
+            const [host, port] = line.trim().split(':');
+            if (host && port && !isNaN(parseInt(port))) {
+              const key = `${host}:${port}`;
+              // Só adicionar se não for duplicata
+              if (!proxies.some(p => `${p.host}:${p.port}` === key)) {
+                proxies.push({ 
+                  host, 
+                  port: parseInt(port), 
+                  source: 'proxyscrape',
+                  country: 'unknown',
+                  priority: 5 // Prioridade menor para outros países
+                });
+              }
+            }
+          }
+          console.log(`   📋 ProxyScrape All: ${linesAll.length} proxies adicionais encontrados`);
+        }
+      } catch (e) {
+        console.log(`   ⚠️  ProxyScrape falhou: ${e.message.substring(0, 50)}`);
+      }
+      
+      // Fonte 2: Buscar SOCKS4 também (geralmente são Elite)
+      try {
+        const responseSOCKS = await axios.get('https://api.proxyscrape.com/v2/?request=get&protocol=socks4&timeout=10000&country=BR', {
+          timeout: 10000
+        });
+        
+        const linesSOCKS = responseSOCKS.data.split('\n').filter(line => line.trim());
+        for (const line of linesSOCKS) {
+          const [host, port] = line.trim().split(':');
+          if (host && port && !isNaN(parseInt(port))) {
+            const key = `${host}:${port}`;
+            if (!proxies.some(p => `${p.host}:${p.port}` === key)) {
+              proxies.push({ 
+                host, 
+                port: parseInt(port), 
+                source: 'proxyscrape-socks4',
+                country: 'BR',
+                protocol: 'socks4',
+                priority: 12 // Prioridade ainda maior para SOCKS4 do Brasil (geralmente Elite)
+              });
+            }
+          }
+        }
+        console.log(`   📋 ProxyScrape SOCKS4 BR: ${linesSOCKS.length} proxies SOCKS4 do Brasil encontrados`);
+      } catch (e) {
+        console.log(`   ⚠️  ProxyScrape SOCKS4 falhou: ${e.message.substring(0, 50)}`);
+      }
+      
+      // Fonte 3: GitHub (alternativa, sem filtro de país)
+      try {
+        const response = await axios.get('https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt', {
+          timeout: 10000
+        });
+        
+        const lines = response.data.split('\n').filter(line => line.trim());
+        for (const line of lines.slice(0, 30)) {
+          const [host, port] = line.trim().split(':');
+          if (host && port && !isNaN(parseInt(port))) {
+            const key = `${host}:${port}`;
+            if (!proxies.some(p => `${p.host}:${p.port}` === key)) {
+              proxies.push({ 
+                host, 
+                port: parseInt(port), 
+                source: 'github',
+                country: 'unknown',
+                priority: 3 // Prioridade baixa
+              });
+            }
+          }
+        }
+        console.log(`   📋 GitHub: ${lines.length} proxies encontrados`);
+      } catch (e) {
+        console.log(`   ⚠️  GitHub falhou: ${e.message.substring(0, 50)}`);
+      }
+      
+      // Ordenar por prioridade (maior primeiro) e limitar
+      proxies.sort((a, b) => (b.priority || 0) - (a.priority || 0));
+      
+      console.log(`✅ Total de ${proxies.length} proxies únicos encontrados`);
+      console.log(`   🇧🇷 Proxies do Brasil: ${proxies.filter(p => p.country === 'BR').length}`);
+      console.log(`   🔒 Proxies SOCKS4: ${proxies.filter(p => p.protocol === 'socks4').length}`);
+      
+      return proxies.slice(0, 30); // Aumentar para 30 para ter mais opções
+    } catch (error) {
+      console.log('⚠️  Erro ao buscar proxies gratuitos:', error.message.substring(0, 100));
+      return [];
+    }
+  }
+
+  /**
+   * Testa se um proxy funciona
+   */
+  async testProxy(proxy) {
+    let testBrowser = null;
+    try {
+      // Determinar protocolo do proxy
+      const protocol = proxy.protocol || 'http';
+      const proxyServer = protocol === 'socks4' 
+        ? `socks4://${proxy.host}:${proxy.port}`
+        : `http://${proxy.host}:${proxy.port}`;
+      
+      testBrowser = await chromium.launch({
+        headless: true,
+        proxy: {
+          server: proxyServer
+        },
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+      });
+      
+      const context = await testBrowser.newContext();
+      const page = await context.newPage();
+      
+      // Tentar acessar site de teste
+      await page.goto('https://api.ipify.org?format=json', { 
+        timeout: 15000,
+        waitUntil: 'domcontentloaded'
+      });
+      
+      const ip = await page.evaluate(() => {
+        try {
+          return JSON.parse(document.body.textContent).ip;
+        } catch {
+          return null;
+        }
+      });
+      
+      await testBrowser.close();
+      
+      if (ip) {
+        console.log(`   ✅ Proxy ${proxy.host}:${proxy.port} funciona - IP: ${ip}`);
+        return { ...proxy, working: true, ip };
+      }
+      
+      return { ...proxy, working: false };
+    } catch (error) {
+      if (testBrowser) {
+        try {
+          await testBrowser.close();
+        } catch {}
+      }
+      return { ...proxy, working: false };
+    }
+  }
+
+  /**
+   * Encontra um proxy gratuito que funciona
+   */
+  async findWorkingProxy() {
+    try {
+      // Se já temos proxies funcionando em cache, usar um deles
+      if (this.workingProxies.length > 0) {
+        const proxy = this.workingProxies[Math.floor(Math.random() * this.workingProxies.length)];
+        console.log(`🔄 Reutilizando proxy conhecido: ${proxy.host}:${proxy.port}`);
+        return proxy;
+      }
+      
+      const proxies = await this.fetchFreeProxies();
+      if (proxies.length === 0) {
+        console.log('⚠️  Nenhum proxy gratuito encontrado');
+        return null;
+      }
+      
+      // Priorizar proxies do Brasil e SOCKS4
+      const prioritizedProxies = proxies.sort((a, b) => {
+        // Primeiro: proxies do Brasil
+        if (a.country === 'BR' && b.country !== 'BR') return -1;
+        if (a.country !== 'BR' && b.country === 'BR') return 1;
+        // Segundo: SOCKS4 (geralmente Elite)
+        if (a.protocol === 'socks4' && b.protocol !== 'socks4') return -1;
+        if (a.protocol !== 'socks4' && b.protocol === 'socks4') return 1;
+        // Terceiro: prioridade
+        return (b.priority || 0) - (a.priority || 0);
+      });
+      
+      console.log(`🧪 Testando ${Math.min(10, prioritizedProxies.length)} proxies (priorizando Brasil e SOCKS4)...`);
+      
+      // Testar proxies priorizados (mais do Brasil primeiro)
+      const testPromises = prioritizedProxies.slice(0, 10).map(proxy => this.testProxy(proxy));
+      const results = await Promise.all(testPromises);
+      
+      const working = results.filter(r => r.working);
+      
+      if (working.length > 0) {
+        // Ordenar proxies funcionais por prioridade
+        working.sort((a, b) => {
+          if (a.country === 'BR' && b.country !== 'BR') return -1;
+          if (a.country !== 'BR' && b.country === 'BR') return 1;
+          return (b.priority || 0) - (a.priority || 0);
+        });
+        
+        this.workingProxies = working;
+        const selected = working[0];
+        const proxyType = selected.protocol === 'socks4' ? 'SOCKS4' : 'HTTP';
+        const country = selected.country === 'BR' ? '🇧🇷 Brasil' : 'outro país';
+        console.log(`✅ Proxy funcionando encontrado: ${selected.host}:${selected.port} (${proxyType}, ${country})`);
+        return selected;
+      }
+      
+      console.log('⚠️  Nenhum proxy gratuito funcionou');
+      return null;
+    } catch (error) {
+      console.log('⚠️  Erro ao encontrar proxy:', error.message.substring(0, 100));
+      return null;
+    }
+  }
+
+  /**
+   * Testa conectividade básica
+   */
+  async testConnection() {
+    try {
+      if (!this.page) {
+        console.log('⚠️  Não há página para testar conectividade');
+        return false;
+      }
+      
+      console.log('🔍 Testando conectividade...');
+      
+      // Testar acesso a site simples
+      try {
+        await this.page.goto('https://www.google.com', { timeout: 30000 });
+        console.log('✅ Consegue acessar Google');
+      } catch (e) {
+        console.log('❌ Não consegue acessar Google:', e.message.substring(0, 50));
+        return false;
+      }
+      
+      // Testar acesso ao domínio Canopus (mas não a página específica)
+      try {
+        await this.page.goto('https://consorciocanopus.com.br', { timeout: 30000 });
+        console.log('✅ Consegue acessar domínio Canopus');
+        return true;
+      } catch (e) {
+        console.log('⚠️  Problema ao acessar domínio Canopus:', e.message.substring(0, 50));
+        return false;
+      }
+    } catch (error) {
+      console.log('❌ Erro no teste de conectividade:', error.message.substring(0, 100));
+      return false;
+    }
+  }
+
+  /**
+   * Verifica se é um bom horário para tentar (horário comercial no Brasil)
+   */
+  isGoodTimeToRetry() {
+    const hour = new Date().getHours();
+    // Horário comercial no Brasil (9h-18h BRT = UTC-3)
+    // Assumindo que o servidor está em UTC, ajustar conforme necessário
+    const brazilHour = (hour - 3 + 24) % 24;
+    return brazilHour >= 9 && brazilHour <= 18;
   }
 
   /**
@@ -101,12 +429,38 @@ class CanopusRPAService {
     try {
       console.log('🚀 Iniciando navegador...');
       
+      // Tentar encontrar proxy gratuito que funciona (opcional, pode falhar)
+      let proxyConfig = null;
+      try {
+        const workingProxy = await this.findWorkingProxy();
+        if (workingProxy) {
+          // Determinar protocolo do proxy
+          const protocol = workingProxy.protocol || 'http';
+          const proxyServer = protocol === 'socks4' 
+            ? `socks4://${workingProxy.host}:${workingProxy.port}`
+            : `http://${workingProxy.host}:${workingProxy.port}`;
+          
+          proxyConfig = {
+            server: proxyServer
+          };
+          this.currentProxy = workingProxy;
+          const proxyType = workingProxy.protocol === 'socks4' ? 'SOCKS4' : 'HTTP';
+          const country = workingProxy.country === 'BR' ? '🇧🇷 Brasil' : 'outro país';
+          console.log(`🔒 Usando proxy gratuito: ${workingProxy.host}:${workingProxy.port} (${proxyType}, ${country})`);
+        } else {
+          console.log('ℹ️  Continuando sem proxy (nenhum proxy gratuito funcionou)');
+        }
+      } catch (proxyError) {
+        console.log('⚠️  Erro ao configurar proxy, continuando sem proxy:', proxyError.message.substring(0, 50));
+      }
+      
       // Rotacionar User-Agent
       this.currentUserAgent = this.getRandomUserAgent();
       console.log(`🌐 User-Agent: ${this.currentUserAgent.substring(0, 60)}...`);
       
       this.browser = await chromium.launch({
         headless: headless,
+        proxy: proxyConfig || undefined,
         args: [
           '--start-maximized',
           '--no-sandbox',
@@ -997,17 +1351,99 @@ class CanopusRPAService {
       
       console.log(`🔐 Navegando para segunda página de login: ${secondLoginUrl}`);
       
-      // Estratégia 1: Tentar encontrar e clicar no botão específico que leva para a segunda página
-      let navigationSuccess = false;
+      // Simular leitura da página antes de tentar navegar
+      console.log('📖 Simulando leitura da página...');
+      await this.simulatePageReading();
       
+      // Verificar se é um bom horário (pode ajudar em alguns casos)
+      if (!this.isGoodTimeToRetry()) {
+        console.log('⏰ Fora do horário comercial, aguardando um pouco mais...');
+        await this.humanDelay(5000, 10000);
+      }
+      
+      // Estratégia 0: Tentar window.location.href DIRETAMENTE primeiro (mais rápido e pode evitar bloqueios)
+      // Isso funciona melhor em VPS porque não cria nova conexão TCP
+      let navigationSuccess = false;
       try {
-        console.log('🔍 Estratégia 1: Procurando botão span.nav-link-title.ng-star-inserted...');
+        console.log('🔍 Estratégia 0: Tentando window.location.href diretamente (mais rápido, evita bloqueios)...');
+        const currentUrl = this.page.url();
+        console.log(`   🔧 Navegando de ${currentUrl} para ${secondLoginUrl} usando window.location.href...`);
         
-        // Aguardar página carregar completamente antes de procurar
-        await this.humanDelay(2000, 3000);
-        await this.simulateMouseMovement();
+        // Aguardar um pouco antes de navegar (comportamento humano) - aumentar delay
+        await this.humanDelay(3000, 6000);
         
-        // Primeiro, tentar o seletor específico fornecido pelo usuário
+        // Tentar múltiplas formas de navegação JavaScript
+        const navSuccess = await this.page.evaluate((url) => {
+          try {
+            // Método 1: window.location.href (mais comum)
+            window.location.href = url;
+            return true;
+          } catch (e1) {
+            try {
+              // Método 2: window.location.replace (não adiciona ao histórico)
+              window.location.replace(url);
+              return true;
+            } catch (e2) {
+              try {
+                // Método 3: window.location.assign
+                window.location.assign(url);
+                return true;
+              } catch (e3) {
+                return false;
+              }
+            }
+          }
+        }, secondLoginUrl);
+        
+        if (!navSuccess) {
+          console.log(`   ⚠️  Não foi possível executar navegação JavaScript`);
+        }
+        
+        // Aguardar navegação acontecer - aumentar tempo de espera
+        console.log(`   ⏳ Aguardando navegação (pode levar até 15 segundos)...`);
+        await this.humanDelay(5000, 8000);
+        
+        // Verificar se navegou - tentar múltiplas vezes com delays crescentes
+        for (let checkAttempt = 1; checkAttempt <= 3; checkAttempt++) {
+          let newUrl = this.page.url();
+          console.log(`   📍 Verificação ${checkAttempt}/3 - URL atual: ${newUrl}`);
+          
+          if (newUrl.includes('afv.consorciocanopus.com.br')) {
+            console.log(`✅ Navegação via window.location.href bem-sucedida! URL: ${newUrl}`);
+            navigationSuccess = true;
+            break;
+          } else if (checkAttempt < 3) {
+            const waitTime = checkAttempt * 3000;
+            console.log(`   ⏳ Aguardando mais ${waitTime/1000}s antes de verificar novamente...`);
+            await this.humanDelay(waitTime, waitTime + 2000);
+          }
+        }
+        
+        // Última verificação
+        if (!navigationSuccess) {
+          const finalUrl = this.page.url();
+          console.log(`   ⚠️  window.location.href não funcionou após todas as tentativas, URL ainda: ${finalUrl}`);
+          console.log(`   💡 Tentando outras estratégias...`);
+        }
+      } catch (e) {
+        const errorMsg = e.message || String(e);
+        console.log(`⚠️  Estratégia 0 falhou: ${errorMsg.substring(0, 100)}`);
+        console.log(`   💡 Tentando outras estratégias...`);
+      }
+      
+      // Estratégia 1: Tentar encontrar e clicar no botão específico que leva para a segunda página
+      // (só tenta se Estratégia 0 falhou)
+      
+      if (!navigationSuccess) {
+        try {
+          console.log('🔍 Estratégia 1: Procurando botão span.nav-link-title.ng-star-inserted...');
+          
+          // Aguardar página carregar completamente antes de procurar - aumentar delay
+          await this.humanDelay(5000, 8000);
+          await this.simulatePageReading();
+          await this.simulateMouseMovement();
+          
+          // Primeiro, tentar o seletor específico fornecido pelo usuário
         const specificButtonSelectors = [
           'span.nav-link-title.ng-star-inserted',
           'span[class*="nav-link-title"][class*="ng-star-inserted"]',
@@ -1389,9 +1825,10 @@ class CanopusRPAService {
               // Tentar próximo seletor
             }
           }
+          }
+        } catch (e) {
+          console.log(`⚠️  Estratégia 1 falhou: ${e.message.substring(0, 100)}`);
         }
-      } catch (e) {
-        console.log(`⚠️  Estratégia 1 falhou: ${e.message.substring(0, 100)}`);
       }
       
       // Estratégia 1.5: Tentar window.location.href na página atual ANTES de criar nova página
@@ -1402,14 +1839,17 @@ class CanopusRPAService {
           const currentUrl = this.page.url();
           const targetUrl = 'https://afv.consorciocanopus.com.br/Sistema/';
           
+          // Aguardar mais tempo antes de tentar
+          await this.humanDelay(5000, 10000);
+          
           console.log(`   🔧 Navegando de ${currentUrl} para ${targetUrl} usando window.location.href...`);
           
           await this.page.evaluate((url) => {
             window.location.href = url;
           }, targetUrl);
           
-          // Aguardar navegação acontecer
-          await this.humanDelay(3000, 5000);
+          // Aguardar navegação acontecer - aumentar tempo
+          await this.humanDelay(5000, 10000);
           
           // Verificar se navegou
           let newUrl = this.page.url();
