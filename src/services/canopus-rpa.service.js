@@ -429,30 +429,34 @@ class CanopusRPAService {
   async initBrowser(headless = true) {
     try {
       console.log('🚀 Iniciando navegador...');
-      
-      // Tentar encontrar proxy gratuito que funciona (opcional, pode falhar)
+
+      // Proxy is opt-in via USE_FREE_PROXY=true env var. Free proxies are slow/unreliable
+      // and direct connection works fine in most environments.
       let proxyConfig = null;
-      try {
-        const workingProxy = await this.findWorkingProxy();
-        if (workingProxy) {
-          // Determinar protocolo do proxy
-          const protocol = workingProxy.protocol || 'http';
-          const proxyServer = protocol === 'socks4' 
-            ? `socks4://${workingProxy.host}:${workingProxy.port}`
-            : `http://${workingProxy.host}:${workingProxy.port}`;
-          
-          proxyConfig = {
-            server: proxyServer
-          };
-          this.currentProxy = workingProxy;
-          const proxyType = workingProxy.protocol === 'socks4' ? 'SOCKS4' : 'HTTP';
-          const country = workingProxy.country === 'BR' ? '🇧🇷 Brasil' : 'outro país';
-          console.log(`🔒 Usando proxy gratuito: ${workingProxy.host}:${workingProxy.port} (${proxyType}, ${country})`);
-        } else {
-          console.log('ℹ️  Continuando sem proxy (nenhum proxy gratuito funcionou)');
+      if (process.env.USE_FREE_PROXY === 'true') {
+        try {
+          const workingProxy = await this.findWorkingProxy();
+          if (workingProxy) {
+            const protocol = workingProxy.protocol || 'http';
+            const proxyServer = protocol === 'socks4' 
+              ? `socks4://${workingProxy.host}:${workingProxy.port}`
+              : `http://${workingProxy.host}:${workingProxy.port}`;
+            
+            proxyConfig = {
+              server: proxyServer
+            };
+            this.currentProxy = workingProxy;
+            const proxyType = workingProxy.protocol === 'socks4' ? 'SOCKS4' : 'HTTP';
+            const country = workingProxy.country === 'BR' ? '🇧🇷 Brasil' : 'outro país';
+            console.log(`🔒 Usando proxy gratuito: ${workingProxy.host}:${workingProxy.port} (${proxyType}, ${country})`);
+          } else {
+            console.log('ℹ️  Continuando sem proxy (nenhum proxy gratuito funcionou)');
+          }
+        } catch (proxyError) {
+          console.log('⚠️  Erro ao configurar proxy, continuando sem proxy:', proxyError.message.substring(0, 50));
         }
-      } catch (proxyError) {
-        console.log('⚠️  Erro ao configurar proxy, continuando sem proxy:', proxyError.message.substring(0, 50));
+      } else {
+        console.log('ℹ️  Conexão direta (USE_FREE_PROXY=true para ativar busca de proxy gratuito)');
       }
       
       // Rotacionar User-Agent
