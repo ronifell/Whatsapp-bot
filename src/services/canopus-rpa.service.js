@@ -1983,64 +1983,141 @@ class CanopusRPAService {
       await this.page.waitForLoadState('networkidle', { timeout: 10000 });
     } catch {}
 
-    // 2) Polling: esperar uma <table> com linhas em <tbody> e visível.
-    let lastDiagnostic = null;
+    // 2) Polling com diagnósticos detalhados
+    let lastState = null;
+    let lastProgressLog = 0;
+
     while (Date.now() - start < timeoutMs) {
-      const state = await this.page.evaluate(() => {
-        const tables = Array.from(document.querySelectorAll('table'));
-        const visibleTablesWithRows = tables
-          .filter(t => t.offsetParent !== null) // visível na página
-          .map(t => ({
-            id: t.id,
-            cls: (t.className || '').toString().slice(0, 120),
-            rowCount: t.querySelectorAll('tbody tr').length,
-            hasNoData: !!t.querySelector('tbody td.dataTables_empty')
-          }))
-          .filter(t => t.rowCount > 0);
+      const state = await this.inspectPlansPageState();
+      lastState = state;
 
-        // Detectar mensagem "processando" do DataTables
-        const processing = !!document.querySelector(
-          '.dataTables_processing:not([style*="display: none"]):not([style*="display:none"]), ' +
-          'div#table_processing:not([style*="display: none"]):not([style*="display:none"])'
-        );
-
-        return {
-          tableCount: tables.length,
-          visibleTablesWithRows,
-          processing
-        };
-      });
-
-      lastDiagnostic = state;
-
-      if (!state.processing && state.visibleTablesWithRows.length > 0) {
-        const t = state.visibleTablesWithRows[0];
-        console.log(`✅ Tabela pronta para extração (${t.rowCount} linha(s) visíveis, id="${t.id}")`);
+      // Sucesso A: tabela visível com linhas reais
+      const tableWithRows = state.tables.find(t => t.visible && t.rowCount > 0 && !t.hasNoData);
+      if (!state.processing && tableWithRows) {
+        console.log(`✅ Tabela pronta para extração (${tableWithRows.rowCount} linha(s) visíveis, id="${tableWithRows.id}")`);
         await this.page.waitForTimeout(500); // pequena estabilização
-        return;
+        return { hasRows: true, rowCount: tableWithRows.rowCount };
+      }
+
+      // Sucesso B: tabela visível com mensagem "sem dados" — filtro legítimo retornou vazio
+      // Damos pelo menos 5s para confirmar que não é só um estado intermediário.
+      const elapsed = Date.now() - start;
+      const tableEmpty = state.tables.find(t => t.visible && (t.hasNoData || t.rowCount === 0));
+      if (!state.processing && tableEmpty && elapsed >= 5000) {
+        console.warn('⚠️  Tabela carregou mas está VAZIA (filtro retornou 0 resultados)');
+        console.warn(`   Mensagem da tabela: "${tableEmpty.emptyMessage || '(sem mensagem)'}"`);
+        return { hasRows: false, rowCount: 0, emptyMessage: tableEmpty.emptyMessage };
+      }
+
+      // Log de progresso a cada 10s para o usuário ver o que está acontecendo
+      if (elapsed - lastProgressLog >= 10000) {
+        lastProgressLog = elapsed;
+        const visibleCount = state.tables.filter(t => t.visible).length;
+        const rowsTotal = state.tables.reduce((acc, t) => acc + t.rowCount, 0);
+        console.log(`   ⏱️  ${Math.round(elapsed / 1000)}s — tabelas: ${state.tables.length} (${visibleCount} visíveis), linhas total: ${rowsTotal}, processando: ${state.processing ? 'SIM' : 'não'}`);
       }
 
       await this.page.waitForTimeout(500);
     }
 
-    // Timeout — log diagnóstico textual (sem screenshot)
+    // Timeout — diagnóstico detalhado e textual (sem screenshot)
+    console.error('❌ Timeout aguardando tabela de planos ficar pronta');
     try {
       const url = this.page.url();
       const title = await this.page.title();
-      console.error('❌ Timeout aguardando tabela de planos ficar pronta');
       console.error(`   URL: ${url}`);
       console.error(`   Título: ${title}`);
-      if (lastDiagnostic) {
-        console.error(`   Total de <table>: ${lastDiagnostic.tableCount}`);
-        console.error(`   Tabelas visíveis com linhas: ${lastDiagnostic.visibleTablesWithRows.length}`);
-        console.error(`   DataTables processando: ${lastDiagnostic.processing ? 'SIM' : 'não'}`);
-        if (lastDiagnostic.visibleTablesWithRows.length > 0) {
-          console.error('   Primeira tabela com linhas:', JSON.stringify(lastDiagnostic.visibleTablesWithRows[0]));
-        }
-      }
     } catch {}
 
+    if (lastState) {
+      console.error(`   Total de <table>: ${lastState.tables.length}`);
+      console.error(`   DataTables processando: ${lastState.processing ? 'SIM' : 'não'}`);
+      console.error(`   Radio selecionado agora: ${lastState.checkedRadio ? `${lastState.checkedRadio.id || '(sem id)'} value="${lastState.checkedRadio.value}" name="${lastState.checkedRadio.name}"` : '(nenhum)'}`);
+      if (lastState.errorMessage) {
+        console.error(`   Mensagem de erro/alerta na página: "${lastState.errorMessage}"`);
+      }
+      console.error('   Detalhes de cada <table>:');
+      lastState.tables.forEach((t, i) => {
+        console.error(`     [${i}] id="${t.id}" visível=${t.visible} linhas=${t.rowCount} hasNoData=${t.hasNoData} display="${t.display}" cls="${t.cls}"`);
+        if (t.emptyMessage) {
+          console.error(`         Mensagem vazia: "${t.emptyMessage}"`);
+        }
+        if (t.tbodyPreview) {
+          console.error(`         tbody preview: ${t.tbodyPreview}`);
+        }
+      });
+      if (lastState.bodyPreview) {
+        console.error(`   Preview do body: ${lastState.bodyPreview}`);
+      }
+    }
+
     throw new Error(`Timeout (${timeoutMs}ms) aguardando tabela de planos com linhas`);
+  }
+
+  /**
+   * Coleta um snapshot detalhado do estado da página de planos para diagnóstico.
+   */
+  async inspectPlansPageState() {
+    return await this.page.evaluate(() => {
+      const tables = Array.from(document.querySelectorAll('table')).map(t => {
+        const cs = window.getComputedStyle(t);
+        const visible = t.offsetParent !== null && cs.display !== 'none' && cs.visibility !== 'hidden';
+        const rows = t.querySelectorAll('tbody tr');
+        const emptyCell = t.querySelector('tbody td.dataTables_empty, tbody td[colspan]');
+        let emptyMessage = '';
+        if (emptyCell) {
+          const txt = (emptyCell.innerText || emptyCell.textContent || '').trim();
+          if (txt && rows.length <= 1) {
+            emptyMessage = txt.slice(0, 200);
+          }
+        }
+        const tbody = t.querySelector('tbody');
+        const tbodyHTML = tbody ? (tbody.innerHTML || '').replace(/\s+/g, ' ').trim().slice(0, 200) : '';
+
+        return {
+          id: t.id || '',
+          cls: (t.className || '').toString().slice(0, 150),
+          display: cs.display,
+          visible,
+          rowCount: rows.length,
+          hasNoData: !!t.querySelector('tbody td.dataTables_empty'),
+          emptyMessage,
+          tbodyPreview: tbodyHTML
+        };
+      });
+
+      const processing = !!document.querySelector(
+        '.dataTables_processing:not([style*="display: none"]):not([style*="display:none"]), ' +
+        'div#table_processing:not([style*="display: none"]):not([style*="display:none"])'
+      );
+
+      // Radio atualmente checado (para confirmar que IPCA continua selecionado)
+      let checkedRadio = null;
+      const rads = document.querySelectorAll('input[type="radio"]');
+      for (const r of rads) {
+        if (r.checked) {
+          checkedRadio = { id: r.id || '', name: r.name || '', value: r.value || '' };
+          break;
+        }
+      }
+
+      // Mensagens de alerta/erro visíveis na página
+      let errorMessage = '';
+      const alertCandidates = document.querySelectorAll('.alert, .alert-danger, .alert-warning, .error-message, [role="alert"]');
+      for (const el of alertCandidates) {
+        if (el.offsetParent !== null) {
+          const txt = (el.innerText || el.textContent || '').trim();
+          if (txt) {
+            errorMessage = txt.slice(0, 200);
+            break;
+          }
+        }
+      }
+
+      const bodyPreview = (document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+
+      return { tables, processing, checkedRadio, errorMessage, bodyPreview };
+    });
   }
 
   /**
