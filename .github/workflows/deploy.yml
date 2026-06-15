@@ -21,26 +21,35 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            cd /var/www/cotafacil-automacao
+            set -e
+            cd /var/www/cotafacil-automacao/Whatsapp-bot
 
             echo "=== Backing up .env ==="
-            cp .env .env.backup
+            if [ -f .env ]; then
+              cp .env /tmp/.env.backup
+              echo "Backup created"
+            fi
 
             echo "=== Pulling latest code from GitHub ==="
             git fetch origin
             git reset --hard origin/main
 
             echo "=== Restoring .env ==="
-            mv .env.backup .env
+            if [ -f /tmp/.env.backup ]; then
+              cp /tmp/.env.backup .env
+              echo "Restored .env"
+            fi
 
             echo "=== Installing dependencies ==="
-            npm install --production
-
-            echo "=== Checking Playwright Chromium ==="
-            npx playwright install chromium || true
+            npm install --omit=dev
 
             echo "=== Restarting app with PM2 ==="
-            pm2 restart cotafacil-automacao || pm2 start src/index.js --name cotafacil-automacao
+            if pm2 list | grep -q "cotafacil-automacao"; then
+              pm2 restart cotafacil-automacao --update-env
+            else
+              pm2 start src/index.js --name cotafacil-automacao
+              pm2 save
+            fi
 
             echo "=== Deploy complete ==="
             pm2 status
