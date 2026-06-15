@@ -2157,11 +2157,72 @@ class CanopusRPAService {
    */
   async selectAutomoveis() {
     try {
-      // Procurar o span com texto "Selecione..."
-      const selectSpan = await this.page.locator('span:has-text("Selecione...")').first();
-      await selectSpan.waitFor({ state: 'visible', timeout: 15000 });
-      
-      console.log('✅ Span "Selecione..." encontrado');
+      // Try multiple selector variations for the dropdown trigger.
+      // The page UI may differ across environments / Canopus updates.
+      const dropdownTriggers = [
+        'span:has-text("Selecione...")',
+        'span:has-text("Selecione")',
+        'span.select2-selection__placeholder',
+        '.select2-selection__rendered',
+        'select[name*="bem"]',
+        'select[name*="tipo"]',
+        'select#tipo_bem',
+        '.form-select',
+        'select.form-control'
+      ];
+
+      let selectSpan = null;
+      let usedSelector = null;
+      for (const sel of dropdownTriggers) {
+        try {
+          const candidate = this.page.locator(sel).first();
+          await candidate.waitFor({ state: 'visible', timeout: 3000 });
+          selectSpan = candidate;
+          usedSelector = sel;
+          break;
+        } catch {}
+      }
+
+      if (!selectSpan) {
+        // Diagnostic: dump page state so we can update the selector.
+        try {
+          const fs = await import('fs');
+          const path = await import('path');
+          const dir = path.resolve(process.cwd(), 'screenshots');
+          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+          const ts = new Date().toISOString().replace(/[:.]/g, '-');
+          const shotPath = path.join(dir, `selectAutomoveis-fail-${ts}.png`);
+          await this.page.screenshot({ path: shotPath, fullPage: true });
+          const url = this.page.url();
+          const title = await this.page.title();
+          const visibleSelects = await this.page.evaluate(() => {
+            const els = Array.from(document.querySelectorAll('select, [class*="select2"], span'));
+            return els
+              .filter(el => el.offsetParent !== null)
+              .slice(0, 30)
+              .map(el => ({
+                tag: el.tagName,
+                id: el.id,
+                name: el.getAttribute('name'),
+                cls: el.className?.toString().slice(0, 80),
+                text: (el.innerText || '').slice(0, 60)
+              }));
+          });
+          console.error('❌ Dropdown trigger não encontrado. Diagnóstico:');
+          console.error(`   URL: ${url}`);
+          console.error(`   Título: ${title}`);
+          console.error(`   Screenshot: ${shotPath}`);
+          console.error(`   Elementos visíveis (select/dropdown/span):`);
+          visibleSelects.forEach((e, i) => {
+            console.error(`     ${i + 1}. <${e.tag}> id="${e.id}" name="${e.name}" class="${e.cls}" text="${e.text}"`);
+          });
+        } catch (diagErr) {
+          console.error('   (diagnóstico falhou:', diagErr.message, ')');
+        }
+        throw new Error('Nenhum seletor de dropdown encontrado. Veja screenshot e logs acima para atualizar seletores.');
+      }
+
+      console.log(`✅ Dropdown encontrado (seletor: ${usedSelector})`);
       
       // Mover mouse para o dropdown antes de clicar (comportamento humano)
       const box = await selectSpan.boundingBox();
