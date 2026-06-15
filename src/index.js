@@ -18,25 +18,17 @@ async function ensurePlaywrightBrowsers() {
       const { chromium } = await import('playwright');
       try {
         // Tentar lançar o browser para verificar se está instalado
-        const browser = await chromium.launch({
-          headless: true,
-          executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
-          args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
+        const browser = await chromium.launch({ headless: true });
         await browser.close();
         console.log('✅ Browsers do Playwright já instalados');
       } catch (error) {
         if (error.message.includes('Executable doesn\'t exist') || error.message.includes('browserType.launch')) {
-          if (process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH) {
-            console.warn('⚠️ PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH configurado mas browser não iniciou. Verifique o caminho.');
-          } else {
-            console.log('⚠️ Browsers não encontrados, tentando instalar...');
-            execSync('npx playwright install chromium', { 
-              stdio: 'inherit',
-              timeout: 300000 // 5 minutos
-            });
-            console.log('✅ Browsers do Playwright instalados com sucesso');
-          }
+          console.log('⚠️ Browsers não encontrados, tentando instalar...');
+          execSync('npx playwright install chromium', { 
+            stdio: 'inherit',
+            timeout: 300000 // 5 minutos
+          });
+          console.log('✅ Browsers do Playwright instalados com sucesso');
         } else {
           throw error;
         }

@@ -254,7 +254,6 @@ class CanopusRPAService {
       
       testBrowser = await chromium.launch({
         headless: true,
-        executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
         proxy: {
           server: proxyServer
         },
@@ -461,7 +460,6 @@ class CanopusRPAService {
       
       this.browser = await chromium.launch({
         headless: headless,
-        executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
         proxy: proxyConfig || undefined,
         args: [
           '--start-maximized',
