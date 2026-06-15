@@ -1822,8 +1822,64 @@ class CanopusRPAService {
       }
       
       await this.page.waitForTimeout(3000);
+
+      // Verify login actually succeeded by checking page content,
+      // not just URL or load state. Canopus returns the login form
+      // for failed/expired sessions, with the URL unchanged.
+      const loginState = await this.page.evaluate(() => {
+        const loginInput = document.querySelector('input[name="login"], input[name="usuario"], input#login');
+        const senhaInput = document.querySelector('input[name="senha"], input[type="password"]');
+        const loginFormStillVisible = !!(loginInput && loginInput.offsetParent !== null) ||
+                                       !!(senhaInput && senhaInput.offsetParent !== null);
+        const bodyText = document.body ? document.body.innerText : '';
+        const errorIndicators = [
+          'usuário ou senha',
+          'usuario ou senha',
+          'inválid',
+          'invalid',
+          'incorret',
+          'falha no login',
+          'falhou'
+        ];
+        const errorMessage = errorIndicators
+          .map(t => {
+            const idx = bodyText.toLowerCase().indexOf(t);
+            return idx >= 0 ? bodyText.substr(Math.max(0, idx - 20), 120) : null;
+          })
+          .find(Boolean) || null;
+        return {
+          url: window.location.href,
+          title: document.title,
+          loginFormStillVisible,
+          errorMessage,
+          bodyPreview: bodyText.substring(0, 300)
+        };
+      });
+
+      if (loginState.loginFormStillVisible) {
+        try {
+          const fs = await import('fs');
+          const path = await import('path');
+          const dir = path.resolve(process.cwd(), 'screenshots');
+          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+          const ts = new Date().toISOString().replace(/[:.]/g, '-');
+          const shotPath = path.join(dir, `login-fail-${ts}.png`);
+          await this.page.screenshot({ path: shotPath, fullPage: true });
+          console.error('❌ Login falhou — formulário de login ainda visível');
+          console.error(`   URL: ${loginState.url}`);
+          console.error(`   Título: ${loginState.title}`);
+          if (loginState.errorMessage) {
+            console.error(`   Mensagem de erro detectada: "${loginState.errorMessage.trim()}"`);
+          }
+          console.error(`   Conteúdo da página (preview): ${loginState.bodyPreview.replace(/\s+/g, ' ').trim()}`);
+          console.error(`   Screenshot: ${shotPath}`);
+        } catch {}
+        throw new Error('Login falhou: formulário de login ainda está visível após submit. Verifique credenciais (CANOPUS_USERNAME/CANOPUS_PASSWORD) ou se o site bloqueou a sessão.');
+      }
+
       console.log('✅ Segundo login realizado com sucesso!');
-      console.log(`   URL atual: ${this.page.url()}`);
+      console.log(`   URL atual: ${loginState.url}`);
+      console.log(`   Título: ${loginState.title}`);
       
     } catch (error) {
       console.error('❌ Erro ao fazer login na segunda página:', error.message);
