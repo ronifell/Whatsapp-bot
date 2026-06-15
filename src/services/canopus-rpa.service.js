@@ -464,24 +464,17 @@ class CanopusRPAService {
         executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
         proxy: proxyConfig || undefined,
         args: [
-          '--start-maximized',
           '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
           '--disable-gpu',
-          '--disable-blink-features=AutomationControlled', // Remove automation flags
-          '--disable-features=IsolateOrigins,site-per-process',
-          '--disable-web-security',
-          '--disable-features=VizDisplayCompositor',
-          // Adicionar flags para melhorar compatibilidade em VPS
+          '--disable-blink-features=AutomationControlled',
           '--disable-software-rasterizer',
           '--disable-background-timer-throttling',
           '--disable-backgrounding-occluded-windows',
           '--disable-renderer-backgrounding',
-          '--disable-features=TranslateUI',
           '--disable-ipc-flooding-protection',
-          // Melhorar estabilidade de conexão
-          '--enable-features=NetworkService,NetworkServiceInProcess',
+          '--disable-features=IsolateOrigins,site-per-process,TranslateUI',
           '--force-color-profile=srgb'
         ]
       });
