@@ -2266,35 +2266,54 @@ class CanopusRPAService {
    * Seleciona "AUTOMOVEIS" no dropdown
    */
   async selectAutomoveis() {
+    return this.selectTipoBemOption('AUTOMOVEIS', ['AUTOMOVEIS', 'AUTOMÓVEIS', 'Automoveis', 'Automóveis']);
+  }
+
+  /**
+   * Seleciona "IMOVEIS" no dropdown
+   */
+  async selectImoveis() {
+    return this.selectTipoBemOption('IMOVEIS', ['IMOVEIS', 'IMÓVEIS', 'Imoveis', 'Imóveis']);
+  }
+
+  /**
+   * Seleciona uma opção no dropdown "Tipo de bem" da página de planos.
+   *
+   * Lida com três variações de UI possíveis:
+   *   1. <select> nativo (caso atual: select[name*="tipo"]) — usa selectOption()
+   *   2. Select2 com span/list — abre clicando e procura a opção
+   *   3. Outros formatos (custom dropdowns) — fallback de busca por texto
+   *
+   * @param {string} label - Rótulo amigável (ex: "AUTOMOVEIS") para logs e busca
+   * @param {string[]} variants - Variações do texto a procurar (acentuação/case)
+   */
+  async selectTipoBemOption(label, variants) {
     try {
-      // Try multiple selector variations for the dropdown trigger.
-      // The page UI may differ across environments / Canopus updates.
       const dropdownTriggers = [
-        'span:has-text("Selecione...")',
-        'span:has-text("Selecione")',
-        'span.select2-selection__placeholder',
-        '.select2-selection__rendered',
         'select[name*="bem"]',
         'select[name*="tipo"]',
         'select#tipo_bem',
+        'select.form-control',
         '.form-select',
-        'select.form-control'
+        'span:has-text("Selecione...")',
+        'span:has-text("Selecione")',
+        'span.select2-selection__placeholder',
+        '.select2-selection__rendered'
       ];
 
-      let selectSpan = null;
+      let trigger = null;
       let usedSelector = null;
       for (const sel of dropdownTriggers) {
         try {
           const candidate = this.page.locator(sel).first();
           await candidate.waitFor({ state: 'visible', timeout: 3000 });
-          selectSpan = candidate;
+          trigger = candidate;
           usedSelector = sel;
           break;
         } catch {}
       }
 
-      if (!selectSpan) {
-        // Diagnostic: dump page state textually (sem screenshot)
+      if (!trigger) {
         try {
           const url = this.page.url();
           const title = await this.page.title();
@@ -2311,7 +2330,7 @@ class CanopusRPAService {
                 text: (el.innerText || '').slice(0, 60)
               }));
           });
-          console.error('❌ Dropdown trigger não encontrado. Diagnóstico:');
+          console.error(`❌ Dropdown trigger não encontrado para "${label}". Diagnóstico:`);
           console.error(`   URL: ${url}`);
           console.error(`   Título: ${title}`);
           console.error(`   Elementos visíveis (select/dropdown/span):`);
@@ -2321,120 +2340,64 @@ class CanopusRPAService {
         } catch (diagErr) {
           console.error('   (diagnóstico falhou:', diagErr.message, ')');
         }
-        throw new Error('Nenhum seletor de dropdown encontrado. Veja logs acima para atualizar seletores.');
+        throw new Error(`Nenhum seletor de dropdown encontrado para "${label}". Veja logs acima para atualizar seletores.`);
       }
 
       console.log(`✅ Dropdown encontrado (seletor: ${usedSelector})`);
-      
-      // Mover mouse para o dropdown antes de clicar (comportamento humano)
-      const box = await selectSpan.boundingBox();
-      if (box) {
-        await this.page.mouse.move(
-          box.x + box.width / 2 + (Math.random() - 0.5) * 5,
-          box.y + box.height / 2 + (Math.random() - 0.5) * 5,
-          { steps: 2 + Math.floor(Math.random() * 2) }
-        );
-        await this.humanDelay(100, 200);
-      }
-      
-      // Clicar no span para abrir o dropdown
-      await selectSpan.click();
-      await this.humanDelay(800, 1500);
-      
-      // Procurar e clicar na opção "AUTOMOVEIS"
-      // Pode ser um link, option, ou outro elemento dentro do dropdown
-      const automoveisSelectors = [
-        'text="AUTOMOVEIS"',
-        'text="AUTOMÓVEIS"',
-        'text="Automoveis"',
-        'text="Automóveis"',
-        'a:has-text("AUTOMOVEIS")',
-        'a:has-text("AUTOMÓVEIS")',
-        'option:has-text("AUTOMOVEIS")',
-        'option:has-text("AUTOMÓVEIS")',
-        '[value="AUTOMOVEIS"]',
-        '[value="AUTOMÓVEIS"]',
-        'li:has-text("AUTOMOVEIS")',
-        'li:has-text("AUTOMÓVEIS")'
-      ];
-      
-      let optionSelected = false;
-      
-      for (const selector of automoveisSelectors) {
-        try {
-          const option = await this.page.locator(selector).first();
-          if (await option.isVisible({ timeout: 2000 })) {
-            await option.click();
-            console.log(`✅ Opção "AUTOMOVEIS" selecionada (seletor: ${selector})`);
-            optionSelected = true;
-            break;
-          }
-        } catch (e) {
-          // Tentar próximo seletor
-        }
-      }
-      
-      // Se não encontrou, tentar estratégia alternativa: buscar por texto exato
-      if (!optionSelected) {
-        console.log('⚠️  Tentando estratégia alternativa para selecionar AUTOMOVEIS...');
-        try {
-          // Buscar todos os elementos clicáveis que contenham "AUTOMOVEIS" ou "AUTOMÓVEIS"
-          const allElements = await this.page.locator('*').all();
-          for (const element of allElements) {
-            try {
-              const text = await element.textContent();
-              if (text && (text.includes('AUTOMOVEIS') || text.includes('AUTOMÓVEIS') || text.includes('Automoveis') || text.includes('Automóveis'))) {
-                if (await element.isVisible({ timeout: 1000 })) {
-                  // Mover mouse para a opção antes de clicar
-                  const box = await element.boundingBox();
-                  if (box) {
-                    await this.page.mouse.move(
-                      box.x + box.width / 2 + (Math.random() - 0.5) * 3,
-                      box.y + box.height / 2 + (Math.random() - 0.5) * 3,
-                      { steps: 2 }
-                    );
-                    await this.humanDelay(50, 150);
-                  }
-                  await element.click();
-                  console.log('✅ Opção "AUTOMOVEIS" selecionada (busca por texto)');
-                  optionSelected = true;
-                  break;
-                }
-              }
-            } catch (e) {
-              // Continuar
-            }
-          }
-        } catch (e) {
-          // Ignorar
-        }
-      }
-      
-      if (!optionSelected) {
-        throw new Error('Não foi possível encontrar e selecionar a opção "AUTOMOVEIS" no dropdown');
-      }
-      
-      await this.page.waitForTimeout(2000);
-      
-    } catch (error) {
-      console.error('❌ Erro ao selecionar AUTOMOVEIS:', error.message);
-      throw error;
-    }
-  }
 
-  /**
-   * Seleciona "IMOVEIS" no dropdown
-   */
-  async selectImoveis() {
-    try {
-      // Procurar o span com texto "Selecione..."
-      const selectSpan = await this.page.locator('span:has-text("Selecione...")').first();
-      await selectSpan.waitFor({ state: 'visible', timeout: 15000 });
-      
-      console.log('✅ Span "Selecione..." encontrado');
-      
-      // Mover mouse para o dropdown antes de clicar (comportamento humano)
-      const box = await selectSpan.boundingBox();
+      // CAMINHO 1: <select> nativo — usar selectOption() é a forma correta e confiável.
+      const tagName = await trigger.evaluate(el => el.tagName);
+      if (tagName === 'SELECT') {
+        let selected = false;
+
+        // Tentativa 1: API do Playwright com cada variante (label e value)
+        for (const v of variants) {
+          if (selected) break;
+          for (const key of ['label', 'value']) {
+            try {
+              await trigger.selectOption({ [key]: v });
+              selected = true;
+              console.log(`✅ Opção "${label}" selecionada via select.selectOption({ ${key}: "${v}" })`);
+              break;
+            } catch {}
+          }
+        }
+
+        // Tentativa 2: match case-insensitive direto no DOM (algumas páginas têm
+        // labels com whitespace extra ou capitalização inconsistente)
+        if (!selected) {
+          const matched = await trigger.evaluate((el, vars) => {
+            const lcVars = vars.map(v => v.toLowerCase());
+            for (const opt of el.options) {
+              const txt = (opt.textContent || '').trim().toLowerCase();
+              const val = (opt.value || '').toLowerCase();
+              for (const v of lcVars) {
+                if (txt === v || val === v || txt.includes(v) || val.includes(v)) {
+                  el.value = opt.value;
+                  el.dispatchEvent(new Event('change', { bubbles: true }));
+                  return { ok: true, value: opt.value, text: (opt.textContent || '').trim() };
+                }
+              }
+            }
+            return { ok: false };
+          }, variants);
+
+          if (matched.ok) {
+            selected = true;
+            console.log(`✅ Opção "${label}" selecionada via DOM (value="${matched.value}", text="${matched.text}")`);
+          }
+        }
+
+        if (!selected) {
+          throw new Error(`Não foi possível encontrar a opção "${label}" no <select>`);
+        }
+
+        await this.page.waitForTimeout(2000);
+        return;
+      }
+
+      // CAMINHO 2: dropdown estilo Select2/custom — clicar para abrir, depois clicar na opção
+      const box = await trigger.boundingBox();
       if (box) {
         await this.page.mouse.move(
           box.x + box.width / 2 + (Math.random() - 0.5) * 5,
@@ -2443,88 +2406,72 @@ class CanopusRPAService {
         );
         await this.humanDelay(100, 200);
       }
-      
-      // Clicar no span para abrir o dropdown
-      await selectSpan.click();
+      await trigger.click();
       await this.humanDelay(800, 1500);
-      
-      // Procurar e clicar na opção "IMOVEIS"
-      // Pode ser um link, option, ou outro elemento dentro do dropdown
-      const imoveisSelectors = [
-        'text="IMOVEIS"',
-        'text="IMÓVEIS"',
-        'text="Imoveis"',
-        'text="Imóveis"',
-        'a:has-text("IMOVEIS")',
-        'a:has-text("IMÓVEIS")',
-        'option:has-text("IMOVEIS")',
-        'option:has-text("IMÓVEIS")',
-        '[value="IMOVEIS"]',
-        '[value="IMÓVEIS"]',
-        'li:has-text("IMOVEIS")',
-        'li:has-text("IMÓVEIS")'
-      ];
-      
+
+      // Tentar seletores específicos da opção
+      const optionSelectors = [];
+      for (const v of variants) {
+        optionSelectors.push(
+          `text="${v}"`,
+          `a:has-text("${v}")`,
+          `option:has-text("${v}")`,
+          `[value="${v}"]`,
+          `li:has-text("${v}")`
+        );
+      }
+
       let optionSelected = false;
-      
-      for (const selector of imoveisSelectors) {
+      for (const selector of optionSelectors) {
         try {
-          const option = await this.page.locator(selector).first();
+          const option = this.page.locator(selector).first();
           if (await option.isVisible({ timeout: 2000 })) {
             await option.click();
-            console.log(`✅ Opção "IMOVEIS" selecionada (seletor: ${selector})`);
+            console.log(`✅ Opção "${label}" selecionada (seletor: ${selector})`);
             optionSelected = true;
             break;
           }
-        } catch (e) {
-          // Tentar próximo seletor
-        }
+        } catch {}
       }
-      
-      // Se não encontrou, tentar estratégia alternativa: buscar por texto exato
+
+      // Fallback: busca ampla por texto entre elementos visíveis
       if (!optionSelected) {
-        console.log('⚠️  Tentando estratégia alternativa para selecionar IMOVEIS...');
+        console.log(`⚠️  Tentando estratégia alternativa para selecionar "${label}"...`);
         try {
-          // Buscar todos os elementos clicáveis que contenham "IMOVEIS" ou "IMÓVEIS"
           const allElements = await this.page.locator('*').all();
           for (const element of allElements) {
             try {
               const text = await element.textContent();
-              if (text && (text.includes('IMOVEIS') || text.includes('IMÓVEIS') || text.includes('Imoveis') || text.includes('Imóveis'))) {
+              if (text && variants.some(v => text.includes(v))) {
                 if (await element.isVisible({ timeout: 1000 })) {
-                  // Mover mouse para a opção antes de clicar
-                  const box = await element.boundingBox();
-                  if (box) {
+                  const eb = await element.boundingBox();
+                  if (eb) {
                     await this.page.mouse.move(
-                      box.x + box.width / 2 + (Math.random() - 0.5) * 3,
-                      box.y + box.height / 2 + (Math.random() - 0.5) * 3,
+                      eb.x + eb.width / 2 + (Math.random() - 0.5) * 3,
+                      eb.y + eb.height / 2 + (Math.random() - 0.5) * 3,
                       { steps: 2 }
                     );
                     await this.humanDelay(50, 150);
                   }
                   await element.click();
-                  console.log('✅ Opção "IMOVEIS" selecionada (busca por texto)');
+                  console.log(`✅ Opção "${label}" selecionada (busca por texto)`);
                   optionSelected = true;
                   break;
                 }
               }
-            } catch (e) {
-              // Continuar
-            }
+            } catch {}
           }
-        } catch (e) {
-          // Ignorar
-        }
+        } catch {}
       }
-      
+
       if (!optionSelected) {
-        throw new Error('Não foi possível encontrar e selecionar a opção "IMOVEIS" no dropdown');
+        throw new Error(`Não foi possível encontrar e selecionar a opção "${label}" no dropdown`);
       }
-      
+
       await this.page.waitForTimeout(2000);
-      
+
     } catch (error) {
-      console.error('❌ Erro ao selecionar IMOVEIS:', error.message);
+      console.error(`❌ Erro ao selecionar ${label}:`, error.message);
       throw error;
     }
   }
