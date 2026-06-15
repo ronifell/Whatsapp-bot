@@ -1857,23 +1857,13 @@ class CanopusRPAService {
       });
 
       if (loginState.loginFormStillVisible) {
-        try {
-          const fs = await import('fs');
-          const path = await import('path');
-          const dir = path.resolve(process.cwd(), 'screenshots');
-          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-          const ts = new Date().toISOString().replace(/[:.]/g, '-');
-          const shotPath = path.join(dir, `login-fail-${ts}.png`);
-          await this.page.screenshot({ path: shotPath, fullPage: true });
-          console.error('❌ Login falhou — formulário de login ainda visível');
-          console.error(`   URL: ${loginState.url}`);
-          console.error(`   Título: ${loginState.title}`);
-          if (loginState.errorMessage) {
-            console.error(`   Mensagem de erro detectada: "${loginState.errorMessage.trim()}"`);
-          }
-          console.error(`   Conteúdo da página (preview): ${loginState.bodyPreview.replace(/\s+/g, ' ').trim()}`);
-          console.error(`   Screenshot: ${shotPath}`);
-        } catch {}
+        console.error('❌ Login falhou — formulário de login ainda visível');
+        console.error(`   URL: ${loginState.url}`);
+        console.error(`   Título: ${loginState.title}`);
+        if (loginState.errorMessage) {
+          console.error(`   Mensagem de erro detectada: "${loginState.errorMessage.trim()}"`);
+        }
+        console.error(`   Conteúdo da página (preview): ${loginState.bodyPreview.replace(/\s+/g, ' ').trim()}`);
         throw new Error('Login falhou: formulário de login ainda está visível após submit. Verifique credenciais (CANOPUS_USERNAME/CANOPUS_PASSWORD) ou se o site bloqueou a sessão.');
       }
 
@@ -1920,19 +1910,11 @@ class CanopusRPAService {
       // Selecionar radio button para IPCA (mudar de fabricante para IPCA)
       console.log('📻 Selecionando radio button IPCA...');
       await this.selectReajusteIPCA();
-      
+
       // Aguardar tabela atualizar após mudança do radio button
       console.log('⏳ Aguardando tabela atualizar após seleção do radio button...');
-      await this.page.waitForTimeout(5000);
-      
-      // Aguardar tabela estar visível e carregada
-      const table = await this.page.locator('table.table.no-more-tables.table-striped.table-hover.dataTable.no-footer, table.dataTable').first();
-      await table.waitFor({ state: 'visible', timeout: 30000 });
-      await this.page.waitForTimeout(3000);
-      
-      // Não extrair dados aqui - a extração será feita em generateCarQuotation
-      // Isso evita criar múltiplos arquivos JSON
-      
+      await this.waitForPlansTableReady(45000);
+
     } catch (error) {
       console.error('❌ Erro ao navegar para página de planos:', error.message);
       throw error;
@@ -1972,19 +1954,93 @@ class CanopusRPAService {
       
       // NOTA: Para IMOVEIS, não selecionamos o radio button IPCA
       // A tabela já deve estar pronta após selecionar IMOVEIS
-      
-      // Aguardar tabela estar visível e carregada
-      const table = await this.page.locator('table.table.no-more-tables.table-striped.table-hover.dataTable.no-footer, table.dataTable').first();
-      await table.waitFor({ state: 'visible', timeout: 30000 });
-      await this.page.waitForTimeout(3000);
-      
-      // Não extrair dados aqui - a extração será feita em generatePropertyQuotation
-      // Isso evita criar múltiplos arquivos JSON
-      
+
+      // Aguardar tabela estar carregada com dados
+      await this.waitForPlansTableReady(45000);
+
     } catch (error) {
       console.error('❌ Erro ao navegar para página de planos (IMOVEIS):', error.message);
       throw error;
     }
+  }
+
+  /**
+   * Aguarda a tabela de planos estar pronta para extração.
+   *
+   * Estratégia robusta que sobrevive ao ciclo destroy/rebuild do DataTables
+   * (que acontece ao mudar dropdown ou radio buttons, removendo
+   * temporariamente as classes `dataTable` e re-renderizando a tabela).
+   *
+   * Aguarda até que exista qualquer <table> com pelo menos 1 linha em <tbody>
+   * E que essa tabela esteja visível. Isso é mais confiável do que esperar
+   * por um conjunto específico de classes CSS.
+   */
+  async waitForPlansTableReady(timeoutMs = 45000) {
+    const start = Date.now();
+
+    // 1) Aguardar AJAX assentar (DataTables faz XHR ao trocar dropdown/radio)
+    try {
+      await this.page.waitForLoadState('networkidle', { timeout: 10000 });
+    } catch {}
+
+    // 2) Polling: esperar uma <table> com linhas em <tbody> e visível.
+    let lastDiagnostic = null;
+    while (Date.now() - start < timeoutMs) {
+      const state = await this.page.evaluate(() => {
+        const tables = Array.from(document.querySelectorAll('table'));
+        const visibleTablesWithRows = tables
+          .filter(t => t.offsetParent !== null) // visível na página
+          .map(t => ({
+            id: t.id,
+            cls: (t.className || '').toString().slice(0, 120),
+            rowCount: t.querySelectorAll('tbody tr').length,
+            hasNoData: !!t.querySelector('tbody td.dataTables_empty')
+          }))
+          .filter(t => t.rowCount > 0);
+
+        // Detectar mensagem "processando" do DataTables
+        const processing = !!document.querySelector(
+          '.dataTables_processing:not([style*="display: none"]):not([style*="display:none"]), ' +
+          'div#table_processing:not([style*="display: none"]):not([style*="display:none"])'
+        );
+
+        return {
+          tableCount: tables.length,
+          visibleTablesWithRows,
+          processing
+        };
+      });
+
+      lastDiagnostic = state;
+
+      if (!state.processing && state.visibleTablesWithRows.length > 0) {
+        const t = state.visibleTablesWithRows[0];
+        console.log(`✅ Tabela pronta para extração (${t.rowCount} linha(s) visíveis, id="${t.id}")`);
+        await this.page.waitForTimeout(500); // pequena estabilização
+        return;
+      }
+
+      await this.page.waitForTimeout(500);
+    }
+
+    // Timeout — log diagnóstico textual (sem screenshot)
+    try {
+      const url = this.page.url();
+      const title = await this.page.title();
+      console.error('❌ Timeout aguardando tabela de planos ficar pronta');
+      console.error(`   URL: ${url}`);
+      console.error(`   Título: ${title}`);
+      if (lastDiagnostic) {
+        console.error(`   Total de <table>: ${lastDiagnostic.tableCount}`);
+        console.error(`   Tabelas visíveis com linhas: ${lastDiagnostic.visibleTablesWithRows.length}`);
+        console.error(`   DataTables processando: ${lastDiagnostic.processing ? 'SIM' : 'não'}`);
+        if (lastDiagnostic.visibleTablesWithRows.length > 0) {
+          console.error('   Primeira tabela com linhas:', JSON.stringify(lastDiagnostic.visibleTablesWithRows[0]));
+        }
+      }
+    } catch {}
+
+    throw new Error(`Timeout (${timeoutMs}ms) aguardando tabela de planos com linhas`);
   }
 
   /**
@@ -1993,8 +2049,8 @@ class CanopusRPAService {
   async selectReajusteIPCA() {
     try {
       console.log('🔍 Procurando radio button IPCA...');
-      
-      // Primeiro, verificar qual radio está selecionado atualmente
+
+      // Verificar qual radio está selecionado atualmente (apenas para log)
       const currentSelection = await this.page.evaluate(() => {
         const allRadios = document.querySelectorAll('input[type="radio"]');
         for (const radio of allRadios) {
@@ -2002,124 +2058,36 @@ class CanopusRPAService {
             return {
               id: radio.id,
               name: radio.name,
-              value: radio.value,
-              checked: true
+              value: radio.value
             };
           }
         }
         return null;
       });
-      
+
       if (currentSelection) {
         console.log(`ℹ️  Radio atual selecionado: ${currentSelection.value || currentSelection.id || 'desconhecido'}`);
       }
-      
-      // Procurar o span com id "ln_reajuste_ipca"
-      const ipcaSpan = await this.page.locator('span#ln_reajuste_ipca').first();
+
+      // Se já está em IPCA, não precisamos fazer nada
+      if (currentSelection && (
+        (currentSelection.value || '').toLowerCase().includes('ipca') ||
+        (currentSelection.id || '').toLowerCase().includes('ipca')
+      )) {
+        console.log('ℹ️  Radio IPCA já estava selecionado, prosseguindo...');
+        return;
+      }
+
+      // Localizar o span com id "ln_reajuste_ipca" (label clicável)
+      const ipcaSpan = this.page.locator('span#ln_reajuste_ipca').first();
       await ipcaSpan.waitFor({ state: 'visible', timeout: 15000 });
       console.log('✅ Span "ln_reajuste_ipca" encontrado');
-      
-      // Usar JavaScript para encontrar e selecionar o radio button de forma mais robusta
-      const radioFound = await this.page.evaluate(() => {
-        const span = document.getElementById('ln_reajuste_ipca');
-        if (!span) {
-          console.log('Span ln_reajuste_ipca não encontrado');
-          return false;
-        }
-        
-        // Estratégia 1: Procurar radio dentro do span
-        let radio = span.querySelector('input[type="radio"]');
-        
-        // Estratégia 2: Procurar no parent
-        if (!radio) {
-          let parent = span.parentElement;
-          let depth = 0;
-          while (parent && depth < 5) {
-            radio = parent.querySelector('input[type="radio"]');
-            if (radio) break;
-            parent = parent.parentElement;
-            depth++;
-          }
-        }
-        
-        // Estratégia 3: Procurar por name comum (geralmente radio buttons têm o mesmo name)
-        if (!radio) {
-          // Procurar todos os radios e encontrar o que está relacionado ao span
-          const allRadios = document.querySelectorAll('input[type="radio"]');
-          const spanText = span.textContent || span.innerText || '';
-          
-          for (const r of allRadios) {
-            // Verificar se o radio está próximo ao span
-            const radioParent = r.parentElement;
-            if (radioParent && (radioParent.contains(span) || span.parentElement?.contains(r))) {
-              // Verificar se o value ou id contém "ipca"
-              const value = (r.value || '').toLowerCase();
-              const id = (r.id || '').toLowerCase();
-              if (value.includes('ipca') || id.includes('ipca')) {
-                radio = r;
-                break;
-              }
-            }
-          }
-        }
-        
-        // Estratégia 4: Procurar por value ou id contendo "ipca"
-        if (!radio) {
-          const allRadios = document.querySelectorAll('input[type="radio"]');
-          for (const r of allRadios) {
-            const value = (r.value || '').toLowerCase();
-            const id = (r.id || '').toLowerCase();
-            const name = (r.name || '').toLowerCase();
-            
-            if (value.includes('ipca') || id.includes('ipca') || name.includes('ipca')) {
-              radio = r;
-              break;
-            }
-          }
-        }
-        
-        if (radio) {
-          // Desmarcar todos os radios do mesmo grupo (name)
-          if (radio.name) {
-            const sameGroupRadios = document.querySelectorAll(`input[type="radio"][name="${radio.name}"]`);
-            sameGroupRadios.forEach(r => {
-              r.checked = false;
-              // Disparar evento change
-              r.dispatchEvent(new Event('change', { bubbles: true }));
-            });
-          }
-          
-          // Marcar o radio IPCA
-          radio.checked = true;
-          
-          // Disparar eventos necessários
-          radio.dispatchEvent(new Event('click', { bubbles: true }));
-          radio.dispatchEvent(new Event('change', { bubbles: true }));
-          radio.dispatchEvent(new Event('input', { bubbles: true }));
-          
-          // Se o radio está dentro de um form, disparar evento no form também
-          const form = radio.closest('form');
-          if (form) {
-            form.dispatchEvent(new Event('change', { bubbles: true }));
-          }
-          
-          console.log('Radio IPCA selecionado:', {
-            id: radio.id,
-            name: radio.name,
-            value: radio.value,
-            checked: radio.checked
-          });
-          
-          return true;
-        }
-        
-        return false;
-      });
-      
-      if (!radioFound) {
-        // Tentar estratégia alternativa: clicar diretamente no span
-        console.log('⚠️  Tentando clicar diretamente no span...');
-        // Mover mouse para o span antes de clicar
+
+      // ESTRATÉGIA PRINCIPAL: usar click real do Playwright no span/label.
+      // Isto dispara o handler real do site (que recarrega a tabela via AJAX).
+      // Eventos sintéticos via dispatchEvent NÃO disparam o handler do framework
+      // que está vinculado em runtime — por isso a tabela nunca recarregava.
+      try {
         const box = await ipcaSpan.boundingBox();
         if (box) {
           await this.page.mouse.move(
@@ -2129,79 +2097,88 @@ class CanopusRPAService {
           );
           await this.humanDelay(100, 200);
         }
-        await ipcaSpan.click();
-        await this.humanDelay(800, 1200);
-        
-        // Verificar se funcionou
-        const clicked = await this.page.evaluate(() => {
+        await ipcaSpan.click({ timeout: 10000 });
+        console.log('🖱️  Click real disparado no span ln_reajuste_ipca');
+      } catch (clickErr) {
+        console.warn(`⚠️  Click direto no span falhou (${clickErr.message}). Tentando clicar no radio/label associado...`);
+
+        // Fallback 1: clicar no radio input ou label associado
+        const fallbackClicked = await this.page.evaluate(() => {
           const span = document.getElementById('ln_reajuste_ipca');
-          if (span) {
-            // Procurar radio próximo novamente
-            let radio = span.querySelector('input[type="radio"]');
-            if (!radio) {
-              let parent = span.parentElement;
-              let depth = 0;
-              while (parent && depth < 5) {
-                radio = parent.querySelector('input[type="radio"]');
-                if (radio) break;
-                parent = parent.parentElement;
-                depth++;
-              }
-            }
-            return radio && radio.checked;
-          }
-          return false;
-        });
-        
-        if (!clicked) {
-          throw new Error('Não foi possível selecionar o radio button IPCA');
-        }
-      }
-      
-      // Aguardar um pouco e verificar se a seleção foi aplicada
-      await this.page.waitForTimeout(2000);
-      
-      // Verificar se o radio IPCA está realmente selecionado
-      const isSelected = await this.page.evaluate(() => {
-        const span = document.getElementById('ln_reajuste_ipca');
-        if (span) {
-          // Procurar radio relacionado
+          if (!span) return false;
+
+          // Tentar encontrar o input radio relacionado ao span
           let radio = span.querySelector('input[type="radio"]');
           if (!radio) {
             let parent = span.parentElement;
             let depth = 0;
             while (parent && depth < 5) {
-              radio = parent.querySelector('input[type="radio"]');
+              radio = parent.querySelector('input[type="radio"][value*="ipca" i], input[type="radio"][id*="ipca" i]')
+                || parent.querySelector('input[type="radio"]');
               if (radio) break;
               parent = parent.parentElement;
               depth++;
             }
           }
-          
-          // Se ainda não encontrou, procurar por value/id
+
+          // Procurar globalmente por radio com value/id contendo "ipca"
           if (!radio) {
             const allRadios = document.querySelectorAll('input[type="radio"]');
             for (const r of allRadios) {
-              const value = (r.value || '').toLowerCase();
-              const id = (r.id || '').toLowerCase();
-              if (value.includes('ipca') || id.includes('ipca')) {
+              const v = (r.value || '').toLowerCase();
+              const i = (r.id || '').toLowerCase();
+              const n = (r.name || '').toLowerCase();
+              if (v.includes('ipca') || i.includes('ipca') || n.includes('ipca')) {
                 radio = r;
                 break;
               }
             }
           }
-          
-          return radio ? radio.checked : false;
+
+          if (!radio) return false;
+
+          // Click real no radio (dispara handler do framework)
+          radio.click();
+          return true;
+        });
+
+        if (!fallbackClicked) {
+          throw new Error('Não foi possível clicar no radio button IPCA (span e radio não encontrados)');
+        }
+      }
+
+      // Aguardar a tabela recarregar via AJAX após a seleção do IPCA.
+      // O DataTables emite uma requisição XHR; networkidle indica conclusão.
+      try {
+        await this.page.waitForLoadState('networkidle', { timeout: 15000 });
+      } catch {
+        // Networkidle pode não ser atingido em sites com pings periódicos —
+        // não é crítico, o waitForTable subsequente cobre o caso.
+      }
+
+      await this.page.waitForTimeout(1500);
+
+      // Verificar se a seleção realmente foi aplicada
+      const isSelected = await this.page.evaluate(() => {
+        const allRadios = document.querySelectorAll('input[type="radio"]');
+        for (const r of allRadios) {
+          if (!r.checked) continue;
+          const v = (r.value || '').toLowerCase();
+          const i = (r.id || '').toLowerCase();
+          const n = (r.name || '').toLowerCase();
+          if (v.includes('ipca') || i.includes('ipca') || n.includes('ipca')) {
+            return true;
+          }
         }
         return false;
       });
-      
+
       if (isSelected) {
         console.log('✅ Radio button IPCA selecionado com sucesso!');
       } else {
-        console.warn('⚠️  Aviso: Não foi possível verificar se o radio IPCA está selecionado');
+        console.warn('⚠️  Aviso: Não foi possível confirmar seleção do IPCA — prosseguindo mesmo assim');
       }
-      
+
     } catch (error) {
       console.error('❌ Erro ao selecionar radio button IPCA:', error.message);
       throw error;
@@ -2240,15 +2217,8 @@ class CanopusRPAService {
       }
 
       if (!selectSpan) {
-        // Diagnostic: dump page state so we can update the selector.
+        // Diagnostic: dump page state textually (sem screenshot)
         try {
-          const fs = await import('fs');
-          const path = await import('path');
-          const dir = path.resolve(process.cwd(), 'screenshots');
-          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-          const ts = new Date().toISOString().replace(/[:.]/g, '-');
-          const shotPath = path.join(dir, `selectAutomoveis-fail-${ts}.png`);
-          await this.page.screenshot({ path: shotPath, fullPage: true });
           const url = this.page.url();
           const title = await this.page.title();
           const visibleSelects = await this.page.evaluate(() => {
@@ -2267,7 +2237,6 @@ class CanopusRPAService {
           console.error('❌ Dropdown trigger não encontrado. Diagnóstico:');
           console.error(`   URL: ${url}`);
           console.error(`   Título: ${title}`);
-          console.error(`   Screenshot: ${shotPath}`);
           console.error(`   Elementos visíveis (select/dropdown/span):`);
           visibleSelects.forEach((e, i) => {
             console.error(`     ${i + 1}. <${e.tag}> id="${e.id}" name="${e.name}" class="${e.cls}" text="${e.text}"`);
@@ -2275,7 +2244,7 @@ class CanopusRPAService {
         } catch (diagErr) {
           console.error('   (diagnóstico falhou:', diagErr.message, ')');
         }
-        throw new Error('Nenhum seletor de dropdown encontrado. Veja screenshot e logs acima para atualizar seletores.');
+        throw new Error('Nenhum seletor de dropdown encontrado. Veja logs acima para atualizar seletores.');
       }
 
       console.log(`✅ Dropdown encontrado (seletor: ${usedSelector})`);
